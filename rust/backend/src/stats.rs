@@ -19,6 +19,8 @@ const CACHE_MAX: usize = 1000;
 
 // $ per million tokens: (prefix, input, output, cacheReadMult). Mirrors stats.mjs PRICES.
 const PRICES: &[(&str, f64, f64, f64)] = &[
+    ("claude-fable-5-2", 8.0, 40.0, 0.025),
+    ("claude-fable-5-1", 10.0, 50.0, 0.025),
     ("claude-fable-5", 10.0, 50.0, 0.1),
     ("claude-mythos", 10.0, 50.0, 0.1),
     ("claude-opus-5-5", 4.0, 20.0, 0.05),
@@ -29,15 +31,17 @@ const PRICES: &[(&str, f64, f64, f64)] = &[
     ("claude-opus-4-8", 5.0, 25.0, 0.1),
     ("claude-opus-4-1", 15.0, 75.0, 0.1),
     ("claude-opus-4-0", 15.0, 75.0, 0.1),
+    ("claude-opus-4", 15.0, 75.0, 0.1),
     ("claude-3-opus", 15.0, 75.0, 0.1),
     ("claude-3-7-sonnet", 3.0, 15.0, 0.1),
     ("claude-3-5-sonnet", 3.0, 15.0, 0.1),
-    ("claude-sonnet-5-5", 2.0, 10.0, 0.1),
+    ("claude-sonnet-5-5", 2.0, 10.0, 0.05),
     ("claude-sonnet-5", 2.0, 10.0, 0.1),
     ("claude-sonnet", 3.0, 15.0, 0.1),
     ("claude-haiku-5-5", 0.1, 0.5, 0.1),
     ("claude-haiku-4-5", 1.0, 5.0, 0.1),
-    ("claude-3-5-haiku", 1.0, 5.0, 0.1),
+    ("claude-haiku-3-5", 0.8, 4.0, 0.1),
+    ("claude-3-5-haiku", 0.8, 4.0, 0.1),
 ];
 
 /// A JavaScript number leaf: ryu-js text, non-finite as `null` (JSON.stringify).
@@ -580,12 +584,21 @@ fn lines(content: &str) -> impl Iterator<Item = &str> {
         .filter(|line| !line.is_empty())
 }
 
-fn price_for(model: &[u16]) -> Option<(f64, f64, f64)> {
+fn price_for(model: &[u16], prompt_tokens: f64) -> Option<(f64, f64, f64)> {
+    if model.starts_with(&"claude-haiku-5-5".encode_utf16().collect::<Vec<_>>())
+        && prompt_tokens > 100_000.0
+    {
+        return Some((0.5, 2.5, 0.1));
+    }
     let mut prices = PRICES.to_vec();
     prices.sort_by_key(|price| std::cmp::Reverse(price.0.len()));
     prices
         .into_iter()
-        .find(|price| model.starts_with(&price.0.encode_utf16().collect::<Vec<_>>()))
+        .find(|price| {
+            model.starts_with(&price.0.encode_utf16().collect::<Vec<_>>())
+                && !(price.0.as_bytes().last().is_some_and(u8::is_ascii_digit)
+                    && model.get(price.0.len()).is_some_and(|c| (48..=57).contains(c)))
+        })
         .map(|(_, input, output, mult)| (input, output, mult))
 }
 
@@ -628,7 +641,9 @@ fn parse_claude_text(content: &str) -> SessionStats {
         let Some(model_units) = model_units else {
             continue;
         };
-        let Some((p_in, p_out, read_mult)) = price_for(&model_units) else {
+        let Some((p_in, p_out, read_mult)) =
+            price_for(&model_units, input + cache_read + cache_create)
+        else {
             continue;
         };
         let mut cost = (input * p_in + output * p_out) / 1e6;
@@ -1042,6 +1057,36 @@ mod tests {
             json.starts_with(r#"{"turns":1,"tokens":1800,"inputTokens":1000,"#),
             "{json}"
         );
+    }
+
+    #[test]
+    fn versioned_claude_prices_and_haiku_prompt_boundary() {
+        let cases = [
+            ("claude-fable-5-2", 8.0, 40.0, 0.2),
+            ("claude-fable-5-1", 10.0, 50.0, 0.25),
+            ("claude-fable-5-20260609", 10.0, 50.0, 1.0),
+            ("claude-sonnet-5-5", 2.0, 10.0, 0.1),
+            ("claude-sonnet-5", 2.0, 10.0, 0.2),
+            ("claude-opus-4", 15.0, 75.0, 1.5),
+            ("claude-opus-4-8", 5.0, 25.0, 0.5),
+            ("claude-haiku-3-5", 0.8, 4.0, 0.08),
+            ("claude-3-5-haiku", 0.8, 4.0, 0.08),
+        ];
+        for (model, input, output, cached) in cases {
+            let content = serde_json::json!({"type":"assistant","message":{"model":model,"usage":{
+                "input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":300,"cache_creation_input_tokens":400,
+                "cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":300}
+            }}}).to_string();
+            let expected = (1000.0 * input + 200.0 * output + 300.0 * cached + 725.0 * input) / 1e6;
+            assert!((parse_claude_text(&content).est_cost_usd.unwrap().0 - expected).abs() < 1e-12, "{model}");
+        }
+        for (cached, input, output) in [(1000, 0.1, 0.5), (1001, 0.5, 2.5)] {
+            let content = serde_json::json!({"type":"assistant","message":{"model":"claude-haiku-5-5","usage":{
+                "input_tokens":99000,"output_tokens":100,"cache_read_input_tokens":cached
+            }}}).to_string();
+            let expected = (99000.0 * input + f64::from(cached) * input * 0.1 + 100.0 * output) / 1e6;
+            assert!((parse_claude_text(&content).est_cost_usd.unwrap().0 - expected).abs() < 1e-12);
+        }
     }
 
     #[test]

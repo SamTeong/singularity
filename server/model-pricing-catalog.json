@@ -1,0 +1,77 @@
+{
+  "verified_on": "2026-11-19",
+  "currency": "USD per million tokens",
+  "rate_order": ["input", "output", "cache_read", "cache_write"],
+  "sources": {
+    "openai": "https://developers.openai.com/api/docs/pricing",
+    "anthropic": "https://platform.claude.com/docs/en/about-claude/pricing",
+    "haiku_3_5_historical": "https://docs.anthropic.com/en/docs/about-claude/pricing"
+  },
+  "pricing": {
+    "base": {
+      "gpt-6.2-astra": [8, 40, 0.4, 10],
+      "gpt-6.2-sol": [2, 10, 0.1, 2.5],
+      "gpt-6.1-sol": [2, 10, 0.1, 2.5],
+      "gpt-6.1-terra": [1, 5, 0.05, 1.25],
+      "gpt-6-astra": [10, 50, 1, 12.5],
+      "gpt-6-sol": [2, 10, 0.2, 2.5],
+      "gpt-6-luna": [0.1, 0.5, 0.01, 0.125],
+      "gpt-5.6-sol": [4, 20, 0.4, 5],
+      "gpt-5.6-terra": [2, 12, 0.2, 2.5],
+      "gpt-5.6-luna": [0.2, 1.2, 0.02, 0.25],
+      "fable-5-2": [8, 40, 0.2, 10],
+      "fable-5-1": [10, 50, 0.25, 12.5],
+      "fable-5": [10, 50, 1, 12.5],
+      "opus-5-5": [4, 20, 0.2, 5],
+      "opus-5": [5, 25, 0.5, 6.25],
+      "opus-4-8": [5, 25, 0.5, 6.25],
+      "opus-4-7": [5, 25, 0.5, 6.25],
+      "opus-4-6": [5, 25, 0.5, 6.25],
+      "opus-4-5": [5, 25, 0.5, 6.25],
+      "opus-4-1": [15, 75, 1.5, 18.75],
+      "opus-4": [15, 75, 1.5, 18.75],
+      "sonnet-5-5": [2, 10, 0.1, 2.5],
+      "sonnet-5": [2, 10, 0.2, 2.5],
+      "sonnet-4-6": [3, 15, 0.3, 3.75],
+      "sonnet-4-5": [3, 15, 0.3, 3.75],
+      "sonnet-4": [3, 15, 0.3, 3.75],
+      "haiku-5-5": [0.1, 0.5, 0.01, 0.125],
+      "haiku-4-5": [1, 5, 0.1, 1.25],
+      "haiku-3-5": [0.8, 4, 0.08, 1],
+      "claude-3-5-haiku": [0.8, 4, 0.08, 1]
+    },
+    "above_200k": {
+      "gpt-6.2-astra": [16, 60, 0.8, 20],
+      "gpt-6.2-sol": [4, 15, 0.2, 5],
+      "gpt-6.1-sol": [4, 15, 0.2, 5],
+      "gpt-6.1-terra": [2, 7.5, 0.1, 2.5],
+      "gpt-6-astra": [20, 75, 2, 25],
+      "gpt-6-sol": [4, 15, 0.4, 5],
+      "gpt-6-luna": [0.2, 0.75, 0.02, 0.25],
+      "gpt-5.6-sol": [8, 30, 0.8, 10],
+      "gpt-5.6-terra": [4, 18, 0.4, 5],
+      "gpt-5.6-luna": [0.4, 1.8, 0.04, 0.5],
+      "haiku-5-5": [0.5, 2.5, 0.05, 0.625]
+    },
+    "long_context_threshold": 272000,
+    "default_key": ""
+  },
+  "reference": {
+    "estimation_scope": "Standard tier, OpenAI 30m writes and Anthropic 5m writes. Billed costs take precedence. Other TTLs and tiers below are reference data, not inferred from missing transcript fields.",
+    "thresholds": {"openai": 272000, "haiku-5-5": 100000},
+    "extended_cache_write": {
+      "openai_12h": {"multiplier_of_30m": 2},
+      "anthropic_1h": {"multiplier_of_5m": 1.6}
+    },
+    "batch": {"multiplier": 0.5, "scope": "Listed OpenAI models and Claude models; including cache pricing. Not combinable with Claude fast mode."},
+    "openai_fast": {"multiplier": 2, "models": ["gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]},
+    "openai_flex": {"multiplier": 0.5, "models": ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]},
+    "openai_ultrafast": [
+      {"models": ["gpt-6-astra", "gpt-6.1-sol"], "multiplier": 6},
+      {"models": ["gpt-6.2-astra", "gpt-6.2-sol"], "multiplier": 3, "through": "2027-02-28", "timezone": "America/Los_Angeles"},
+      {"models": ["gpt-6.2-astra", "gpt-6.2-sol"], "multiplier": 6, "from": "2027-03-01", "timezone": "America/Los_Angeles"}
+    ],
+    "anthropic_fast": {"multiplier": 2, "models": ["fable-5-2", "opus-5-5", "opus-5", "opus-4-8"]},
+    "historical_only": ["opus-4-1", "opus-4", "sonnet-4", "haiku-3-5"]
+  }
+}

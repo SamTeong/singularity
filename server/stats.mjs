@@ -22,6 +22,8 @@ export const COST_STATE_DIR = join(USAGE_SKILL_STATE, 'cost-state');
 // input (1h TTL) — applied per-TTL below when the usage object has a
 // cache_creation breakdown, else 1.25x on the whole bucket.
 const PRICES = [
+  ['claude-fable-5-2', { input: 8, output: 40, cacheReadMult: 0.025 }],
+  ['claude-fable-5-1', { input: 10, output: 50, cacheReadMult: 0.025 }],
   ['claude-fable-5', { input: 10, output: 50 }],
   ['claude-mythos', { input: 10, output: 50 }],
   ['claude-opus-5-5', { input: 4, output: 20, cacheReadMult: 0.05 }],
@@ -32,21 +34,25 @@ const PRICES = [
   ['claude-opus-4-8', { input: 5, output: 25 }],
   ['claude-opus-4-1', { input: 15, output: 75 }],
   ['claude-opus-4-0', { input: 15, output: 75 }],
+  ['claude-opus-4', { input: 15, output: 75 }],
   ['claude-3-opus', { input: 15, output: 75 }],
   ['claude-3-7-sonnet', { input: 3, output: 15 }],
   ['claude-3-5-sonnet', { input: 3, output: 15 }],
-  ['claude-sonnet-5-5', { input: 2, output: 10 }],
+  ['claude-sonnet-5-5', { input: 2, output: 10, cacheReadMult: 0.05 }],
   ['claude-sonnet-5', { input: 2, output: 10 }],
   ['claude-sonnet', { input: 3, output: 15 }],
-  // haiku-5-5: prompts over 100k tokens are $0.50/$2.50 — no long-context tiering in this table, so not modeled
   ['claude-haiku-5-5', { input: 0.1, output: 0.5 }],
   ['claude-haiku-4-5', { input: 1, output: 5 }],
-  ['claude-3-5-haiku', { input: 1, output: 5 }],
+  ['claude-haiku-3-5', { input: 0.8, output: 4 }],
+  ['claude-3-5-haiku', { input: 0.8, output: 4 }],
 ].sort((a, b) => b[0].length - a[0].length); // longest prefix first
 
-function priceFor(model) {
+function priceFor(model, promptTokens) {
   if (!model) return null;
-  for (const [prefix, p] of PRICES) if (model.startsWith(prefix)) return p;
+  if (model.startsWith('claude-haiku-5-5') && promptTokens > 100000) return { input: 0.5, output: 2.5 };
+  for (const [prefix, p] of PRICES) {
+    if (model.startsWith(prefix) && !(/\d$/.test(prefix) && /\d/.test(model[prefix.length] || ''))) return p;
+  }
   return null;
 }
 
@@ -105,7 +111,7 @@ export async function parseByPath(p) {
       cacheReadTokens += cacheRead; cacheWriteTokens += cacheCreate;
       tokens += input + output + cacheRead + cacheCreate;
       if (o.message?.model && o.message.model !== '<synthetic>') models.add(o.message.model);
-      const price = priceFor(o.message?.model);
+      const price = priceFor(o.message?.model, input + cacheRead + cacheCreate);
       if (!price) continue; // unknown model prefix — skip, leaves estCostUsd null for pure-unknown sessions
       let cost = (input * price.input + output * price.output) / 1e6;
       cost += (cacheRead * price.input * (price.cacheReadMult ?? 0.1)) / 1e6;
