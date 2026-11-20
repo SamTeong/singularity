@@ -48,6 +48,20 @@ const DEFAULT_ROOT = '~/.claude/projects';
 // nothing, so it degrades to 'all' instead — same for ?scope= below.
 const TOOLS = new Set(['all', 'claude', 'codex']);
 
+// The persisted root can be the '~' literal (the daemon default) while the
+// picker hands back an absolute path from /fs/browse, so compare both after
+// expansion, with separator style and a trailing slash flattened. An unresolved
+// root (null) is never "the same" — the pick still has to set it.
+const samePath = (a, b) => {
+  if (!a || !b) return false;
+  const norm = (p) => {
+    const path = untildify(p);
+    const normalized = /^(?:[a-z]:|\\\\)/i.test(path) ? path.replaceAll('\\', '/') : path;
+    return normalized.replace(/\/+$/, '');
+  };
+  return norm(a) === norm(b);
+};
+
 const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
 
 // Small pulsing status dot for a registry-owned live process.
@@ -131,12 +145,13 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const updateQuery = useUpdateQuery();
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
-  const listRequestRef = useRef(false);
-  const listLoadRef = useRef(null);
   // Owns the in-flight /api/transcript response: bumped by every open() and by
   // pickRoot(), so a request issued for an earlier selection or root can never
   // paint its transcript or clear the current request's loading flag.
   const txRequestRef = useRef(0);
+  // Bumped only when the root changes: a stats response for the old root must
+  // not merge its per-session costs onto the new root's rows.
+  const rootGenRef = useRef(0);
 
   // Load the FS-persisted root once on mount (sessions load via the [root]
   // effect, which waits for this to resolve). Falls back to DEFAULT_ROOT once
@@ -155,27 +170,25 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
     if (!active || root == null) return;
     let current = true;
     let request = 0;
+    // Per effect, not a component-wide ref: a root switch must issue its own
+    // list request immediately instead of waiting out the previous root's scan.
+    let inFlight = false;
     const load = () => {
-      if (document.hidden || listRequestRef.current) return;
-      listRequestRef.current = true;
+      if (document.hidden || inFlight) return;
+      inFlight = true;
       const currentRequest = ++request;
       fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}${hideReviews ? '&hideReviews=1' : ''}`)
         .then((r) => { if (!r.ok) throw new Error('Failed to load transcripts'); return r.json(); })
         .then((d) => { if (current && currentRequest === request) { setSessErr(null); setSessions(d.sessions || []); setSessLoaded(true); } })
         .catch(() => { if (current && currentRequest === request) { setSessErr('Failed to load transcripts.'); setSessLoaded(true); } })
-        .finally(() => {
-          listRequestRef.current = false;
-          if (listLoadRef.current && listLoadRef.current !== load) listLoadRef.current();
-        });
+        .finally(() => { inFlight = false; });
     };
-    listLoadRef.current = load;
     load();
     const iv = setInterval(load, 15000);
     return () => {
       current = false;
       request++;
       clearInterval(iv);
-      if (listLoadRef.current === load) listLoadRef.current = null;
     };
   }, [root, active, hideReviews]);
 
@@ -202,8 +215,9 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
     // ponytail: codex cost notional, wire stats when needed
     const list = (items || []).filter((it) => it?.project && it?.id && it.source !== 'codex').map((it) => ({ project: it.project, id: it.id }));
     if (!list.length || root == null) return; // root not resolved yet — don't guess
+    const gen = rootGenRef.current;
     fetch('/api/transcripts/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
-      .then((r) => r.json()).then((d) => setStats((prev) => ({ ...prev, ...(d.stats || {}) }))).catch(() => {});
+      .then((r) => r.json()).then((d) => { if (gen === rootGenRef.current) setStats((prev) => ({ ...prev, ...(d.stats || {}) })); }).catch(() => {});
   }, [root]);
 
   const open = (item) => {
@@ -246,16 +260,21 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   // VERIFY: transcripts-root-same-noop
   const pickRoot = (p) => {
     setPicking(false);
-    // Preserve the loaded list when choosing the same root.
-    if (p === root) return;
+    // Preserve the loaded list when choosing the same root — also when the
+    // persisted root is the '~' literal and the picker hands back an absolute path.
+    if (samePath(p, root)) return;
     txRequestRef.current++; // an in-flight transcript belongs to the old root
+    rootGenRef.current++; // …and so does an in-flight stats response
     setRoot(p);
     // Drop the open transcript from the URL too — it belongs to the old root,
     // and leaving it there would have the effect below re-open it immediately.
     setSel(null); setTranscript(null); setMatches(null); setCapped(false); setPage(1);
+    // Nothing is loading for the root we just left: an abandoned detail request
+    // can no longer clear its own loading flag (txRequestRef moved on).
+    setLoadingFile(false); setLoadErr(null);
     // Everything below is root-scoped: drop it and show the cold-scan loading
     // state until the [root] effect's list lands (ordinary polls keep it).
-    setSessions([]); setSessLoaded(false); setSessErr(null); setExpanded(new Set());
+    setSessions([]); setSessLoaded(false); setSessErr(null); setExpanded(new Set()); setStats({});
     updateQuery({ q: null, project: null, session: null, source: null });
     fetch('/api/transcripts/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };

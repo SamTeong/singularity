@@ -69,6 +69,27 @@ test('parseSession: unknown model → estCostUsd stays null (tokens/turns still 
   }
 });
 
+test('parseSession: Haiku 5.5 long-context tier honors the numeric version boundary', async () => {
+  const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-haiku-tier';
+  const tieredId = randomUUID();
+  const longerId = randomUUID();
+  const dir = writeTranscript(cwd, tieredId, [
+    { type: 'assistant', message: { model: 'claude-haiku-5-5', usage: { input_tokens: 99000, cache_read_input_tokens: 1001 } } },
+  ]);
+  writeTranscript(cwd, longerId, [
+    { type: 'assistant', message: { model: 'claude-haiku-5-55', usage: { input_tokens: 99000, cache_read_input_tokens: 1001 } } },
+  ]);
+  try {
+    const tiered = await parseSession(cwd, tieredId);
+    // 99000*0.5 + 1001*0.5*0.1 = 49550.05 / 1e6 (prompt 99000+1001 > 100000)
+    assert.ok(Math.abs(tiered.estCostUsd - 0.04955005) < 1e-9, tiered.estCostUsd);
+    const longer = await parseSession(cwd, longerId);
+    assert.equal(longer.estCostUsd, null, 'a longer numeric segment is not Haiku 5.5');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('sessionStats: per-bucket token breakdown + models, keyed by project dirname', async () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-breakdown';
   const id = randomUUID();

@@ -121,7 +121,7 @@ impl Pricing {
                 || key.starts_with("sonnet")
                 || key.starts_with("haiku")
                 || key.starts_with("fable")
-                || key.starts_with("claude-3-5-haiku"))
+                || key.starts_with("claude-"))
         })
     }
 
@@ -659,6 +659,17 @@ mod tests {
         // unreachable from a model id.
         assert_eq!(table.price_key("claude-Opus"), Some("opus"));
         assert!(!table.is_third_party("claude-Opus"));
+        // An explicit `claude-*` pricing key is Anthropic too: the report keeps
+        // Claude Code's authoritative billed cost instead of the estimate.
+        let claude = pricing(
+            r#"{"base":{"claude-3-5-sonnet":[3,15,0.3,3.75],"claude-3-opus":[15,75,1.5,18.75]}}"#,
+        );
+        assert_eq!(
+            claude.price_key("claude-3-5-sonnet-20241022"),
+            Some("claude-3-5-sonnet")
+        );
+        assert!(!claude.is_third_party("claude-3-5-sonnet-20241022"));
+        assert!(!claude.is_third_party("claude-3-opus-20240229"));
     }
 
     #[test]

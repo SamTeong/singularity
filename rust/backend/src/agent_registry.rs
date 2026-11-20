@@ -69,6 +69,10 @@ const IDLE_MS: i64 = 2000;
 /// `recentRepos` keeps at most this many entries (`agents.mjs:15`).
 const RECENT_MAX: usize = 10;
 
+/// A startup document that could not be read fully: writing would clobber the
+/// bytes the parser could not represent. `ensure_writable` is the only way out.
+const WRITE_BLOCKED: &str = "agents.json write failed: state was not fully readable at startup";
+
 // VERIFY: registry-pty-port
 /// The PTY operations the registry needs. Implemented for [`PtyHost`] in the
 /// daemon and by a fake in tests, so the state machine never spawns a process.
@@ -458,12 +462,23 @@ impl Registry {
     /// `init()` (`agents.mjs:107-123`): load `agents.json`, fold the legacy
     /// `name` into `title` and mark every entry `detached` (the ptys are gone
     /// after a restart). A malformed file is reported so the host can log it,
-    /// exactly like Node's `init` warning; the registry stays empty.
+    /// exactly like Node's `init` warning; the readable rows stay in memory.
+    /// This is also the recovery path for a document that failed an earlier
+    /// load: a repaired or removed file lifts the write gate without dropping a
+    /// row or replacing a pty this daemon owns.
     pub fn load(&self) -> Result<(), String> {
-        let mut state = self.state.lock().unwrap();
+        self.load_into(&mut self.state.lock().unwrap())
+    }
+
+    fn load_into(&self, state: &mut State) -> Result<(), String> {
         let loaded = match fs::read_to_string(&self.config.state_file) {
             Ok(text) => AgentsFile::parse(&text).map_err(|error| error.to_string()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // A deleted document cannot be clobbered; the rows already in
+                // memory are what the next persist writes back.
+                state.load_blocked = false;
+                return Ok(());
+            }
             Err(error) => Err(error.to_string()),
         };
         let (mut file, partial) = match loaded {
@@ -474,34 +489,35 @@ impl Registry {
             }
         };
         state.load_blocked = partial;
-        state.agents.clear();
         state.recent_repos = std::mem::take(&mut file.recent_repos);
         for mut record in std::mem::take(&mut file.agents) {
             record.normalize_legacy();
             record.status = Status::Detached;
-            let agent = Agent {
-                record,
-                pid: None,
-                live: false,
-                generation: 0,
-                ring: Vec::new(),
-                ring_bytes: 0,
-                written: 0,
-                running_since: None,
-                last_output: None,
-                decoder_carry: Vec::new(),
-                respawn_after_exit: None,
-                remove_on_exit: false,
-                pending_lifecycle: None,
-            };
-            // A Map keyed by id keeps the last occurrence; mirror that.
+            // A Map keyed by id keeps the last occurrence; mirror that. A reload
+            // after a repair must not replace a live entry, and a row only the
+            // in-memory state knows about must survive the merge.
             match state
                 .agents
                 .iter_mut()
-                .find(|existing| existing.record.id == agent.record.id)
+                .find(|existing| existing.record.id == record.id)
             {
-                Some(existing) => *existing = agent,
-                None => state.agents.push(agent),
+                Some(existing) if existing.live => {}
+                Some(existing) => existing.record = record,
+                None => state.agents.push(Agent {
+                    record,
+                    pid: None,
+                    live: false,
+                    generation: 0,
+                    ring: Vec::new(),
+                    ring_bytes: 0,
+                    written: 0,
+                    running_since: None,
+                    last_output: None,
+                    decoder_carry: Vec::new(),
+                    respawn_after_exit: None,
+                    remove_on_exit: false,
+                    pending_lifecycle: None,
+                }),
             }
         }
         if partial {
@@ -749,6 +765,11 @@ impl Registry {
     /// spawn and one `session id already in use`, like Node's synchronous
     /// `agents.get`/`agents.set` pair.
     pub fn create(&self, input: CreateAgent) -> Result<AgentWire, String> {
+        // A known-unreadable startup document is retried here, before anything is
+        // spawned or mutated (including `ensureTrusted`'s config edit), so a save
+        // that cannot land never strands a live pty or a half-applied record.
+        // VERIFY: registry-create-gate
+        self.ensure_writable()?;
         let home = self.config.bins.paths.home.clone();
         let cwd = input.cwd.as_deref().map(|raw| untildify_cwd(raw, &home));
         let id = input
@@ -841,6 +862,9 @@ impl Registry {
     /// is returned unchanged (Node's `if (!a || a.proc) return a`), and the
     /// reservation makes that check atomic with the registration.
     pub fn reattach(&self, id: &str) -> Result<Option<AgentWire>, String> {
+        // Same pre-spawn gate as `create`: a resume is a spawn like any other.
+        // VERIFY: registry-reattach-gate
+        self.ensure_writable()?;
         #[cfg(test)]
         self.interleave(id, InterleaveStage::Enter);
         let reservation = {
@@ -1146,8 +1170,12 @@ impl Registry {
                 self.remember_repo(cwd);
             }
         }
-        self.persist()?;
+        let persisted = self.persist();
+        // The pty is live even when the save failed; announce it rather than
+        // leaving the client to discover it on the next list snapshot.
+        // VERIFY: registry-launch-emits-on-persist-failure
         self.emit_list();
+        persisted?;
         Ok(wire)
     }
 
@@ -1275,9 +1303,15 @@ impl Registry {
             let _ = self.port.kill(id);
             return Ok(());
         }
+        // Dropping a detached row is persisted state: retry a blocked startup
+        // document before the entry leaves memory, and announce the removal even
+        // when the save itself fails.
+        // VERIFY: registry-lifecycle-gate
+        self.ensure_writable()?;
         self.state.lock().unwrap().remove(id);
-        self.persist()?;
+        let persisted = self.persist();
         self.emit_list();
+        persisted?;
         Ok(())
     }
 
@@ -1320,9 +1354,15 @@ impl Registry {
             let _ = self.port.kill(id);
             return Ok(());
         }
+        // Dropping a detached row is persisted state: retry a blocked startup
+        // document before the entry leaves memory, and announce the removal even
+        // when the save itself fails.
+        // VERIFY: registry-lifecycle-gate
+        self.ensure_writable()?;
         self.state.lock().unwrap().remove(id);
-        self.persist()?;
+        let persisted = self.persist();
         self.emit_list();
+        persisted?;
         Ok(())
     }
 
@@ -1388,6 +1428,7 @@ impl Registry {
     /// `reorder` (`agents.mjs:618-627`): accept only a permutation of every
     /// current id; anything else is a no-op.
     pub fn reorder(&self, ids: &[String]) -> Result<(), String> {
+        self.ensure_writable()?;
         {
             let mut state = self.state.lock().unwrap();
             if ids.len() != state.agents.len() {
@@ -1508,9 +1549,7 @@ impl Registry {
         let bytes = {
             let state = self.state.lock().unwrap();
             if state.load_blocked {
-                return Err(
-                    "agents.json write failed: state was not fully readable at startup".to_owned(),
-                );
+                return Err(WRITE_BLOCKED.to_owned());
             }
             AgentsFile {
                 agents: state
@@ -1525,6 +1564,19 @@ impl Registry {
         };
         fs_atomic::write_atomic(&self.config.state_file, &bytes)
             .map_err(|error| format!("agents.json write failed: {error}"))
+    }
+
+    // VERIFY: registry-ensure-writable
+    /// Retry a blocked startup load before a mutation. A repaired or removed
+    /// document lifts the gate and merges its rows; a still-unreadable one keeps
+    /// it, so the caller fails before spawning a pty or dropping an entry that
+    /// the save would silently lose.
+    fn ensure_writable(&self) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap();
+        if state.load_blocked {
+            self.load_into(&mut state).map_err(|_| WRITE_BLOCKED.to_owned())?;
+        }
+        Ok(())
     }
 
     // --- internals -------------------------------------------------------
@@ -4039,6 +4091,200 @@ mod tests {
         assert_eq!(registry.snapshot()[0].id, "good");
         assert!(registry.persist().is_err());
         assert_eq!(fs::read(fixture.state_file()).unwrap(), before);
+    }
+
+    // R1/R2: a document the parser could not fully read must fail the mutation
+    // before the pty exists, not after the spawn behind a refused save.
+    #[test]
+    fn create_and_reattach_are_refused_before_spawning_while_the_document_is_unreadable() {
+        let fixture = Fixture::new();
+        fixture.write_agents(vec![json!({"id": "good"}), json!({"id": 7})]);
+        let before = fs::read(fixture.state_file()).unwrap();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        assert!(registry.load().is_err());
+
+        let error = registry
+            .create(create_input(&fixture, "new", "claude"))
+            .unwrap_err();
+        assert!(error.starts_with("agents.json write failed:"), "{error}");
+        let error = registry.reattach("good").unwrap_err();
+        assert!(error.starts_with("agents.json write failed:"), "{error}");
+        assert_eq!(port.spawn_count(), 0);
+        assert_eq!(registry.snapshot().len(), 1);
+        assert_eq!(fs::read(fixture.state_file()).unwrap(), before);
+
+        // A repaired document lifts the gate; the readable row survives the retry.
+        fixture.write_agents(vec![json!({"id": "good"})]);
+        registry
+            .create(create_input(&fixture, "new", "claude"))
+            .unwrap();
+        assert_eq!(port.spawn_count(), 1);
+        let ids: Vec<String> = fixture
+            .read_agents()
+            .agents
+            .into_iter()
+            .map(|record| record.id)
+            .collect();
+        assert_eq!(ids, ["good", "new"]);
+    }
+
+    // R1: a transient startup read error is not a one-way door.
+    #[test]
+    fn a_transient_startup_read_error_recovers_on_the_next_mutation() {
+        let fixture = Fixture::new();
+        let blocked = fixture.path("blocked");
+        fs::create_dir_all(&blocked).unwrap();
+        let port = FakePort::new();
+        let registry = Registry::new(
+            Bus::new(),
+            port.clone(),
+            RegistryConfig {
+                state_file: blocked.clone(),
+                ..fixture.config()
+            },
+        );
+        assert!(registry.load().is_err());
+        assert!(
+            registry
+                .create(create_input(&fixture, "later", "claude"))
+                .unwrap_err()
+                .starts_with("agents.json write failed:")
+        );
+        assert_eq!(port.spawn_count(), 0);
+
+        fs::remove_dir(&blocked).unwrap();
+        registry
+            .create(create_input(&fixture, "later", "claude"))
+            .unwrap();
+        assert_eq!(port.spawn_count(), 1);
+        assert!(blocked.is_file());
+    }
+
+    // R3: NotFound must clear the gate and keep the rows already in memory.
+    #[test]
+    fn reload_after_the_partial_document_is_deleted_resumes_writes() {
+        let fixture = Fixture::new();
+        fixture.write_agents(vec![json!({"id": "good"}), json!({"id": 7})]);
+        let registry = fixture.registry(FakePort::new());
+        assert!(registry.load().is_err());
+        assert_eq!(registry.snapshot()[0].id, "good");
+        assert!(registry.persist().is_err());
+
+        fs::remove_file(fixture.state_file()).unwrap();
+        registry.load().unwrap();
+        registry.persist().unwrap();
+        let persisted: Vec<String> = fixture
+            .read_agents()
+            .agents
+            .into_iter()
+            .map(|record| record.id)
+            .collect();
+        assert_eq!(persisted, ["good"]);
+    }
+
+    // A reload after a repair merges instead of replacing: live ptys and
+    // memory-only rows are never dropped.
+    #[test]
+    fn reload_keeps_a_live_agent_and_rows_that_only_exist_in_memory() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port);
+        registry
+            .create(create_input(&fixture, "live", "claude"))
+            .unwrap();
+        registry
+            .create(create_input(&fixture, "only-memory", "claude"))
+            .unwrap();
+        fixture.write_agents(vec![
+            json!({"id": "live", "title": "on-disk"}),
+            json!({"id": "restored", "title": "from-disk"}),
+        ]);
+
+        registry.load().unwrap();
+        let agents = registry.snapshot();
+        let ids: Vec<&str> = agents.iter().map(|agent| agent.id.as_str()).collect();
+        assert!(ids.contains(&"live"));
+        assert!(ids.contains(&"only-memory"));
+        assert!(ids.contains(&"restored"));
+        assert_eq!(
+            agents
+                .iter()
+                .find(|agent| agent.id == "live")
+                .unwrap()
+                .title
+                .as_deref(),
+            Some("demo")
+        );
+        assert!(registry.is_live("only-memory"));
+    }
+
+    // R2: a detached drop is refused before the row leaves memory, then lands
+    // once the document is repaired.
+    #[test]
+    fn kill_and_remove_leave_a_detached_row_in_place_while_writes_are_blocked() {
+        let fixture = Fixture::new();
+        fixture.write_agents(vec![json!({"id": "good"}), json!({"id": 7})]);
+        let before = fs::read(fixture.state_file()).unwrap();
+        let registry = fixture.registry(FakePort::new());
+        assert!(registry.load().is_err());
+
+        for result in [registry.kill("good"), registry.remove("good")] {
+            let error = result.unwrap_err();
+            assert!(error.starts_with("agents.json write failed:"), "{error}");
+            assert_eq!(registry.snapshot().len(), 1);
+        }
+        assert_eq!(fs::read(fixture.state_file()).unwrap(), before);
+
+        fixture.write_agents(vec![json!({"id": "good"})]);
+        registry.remove("good").unwrap();
+        assert!(registry.snapshot().is_empty());
+        assert!(fixture.read_agents().agents.is_empty());
+    }
+
+    // R2: the pty is live even when the final save fails; clients must hear it.
+    #[test]
+    fn create_emits_the_list_when_the_final_persist_fails() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = Registry::new(
+            Bus::new(),
+            port,
+            RegistryConfig {
+                state_file: fixture.path("missing/agents.json"),
+                ..fixture.config()
+            },
+        );
+        let lists = record_lists(&registry);
+        let error = registry
+            .create(create_input(&fixture, "unsaved", "claude"))
+            .unwrap_err();
+        assert!(error.starts_with("agents.json write failed:"), "{error}");
+        assert_eq!(
+            lists.lock().unwrap().last().cloned(),
+            Some(vec!["unsaved".to_owned()])
+        );
+        assert_eq!(registry.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn kill_and_remove_emit_the_list_when_the_final_persist_fails() {
+        let fixture = Fixture::new();
+        fixture.write_agents(vec![json!({"id": "dead"}), json!({"id": "dead2"})]);
+        let registry = fixture.registry(FakePort::new());
+        registry.load().unwrap();
+        // Deterministic write failure: the atomic writer stages beside the target.
+        fs::remove_dir_all(fixture.path("state")).unwrap();
+        let lists = record_lists(&registry);
+
+        let error = registry.kill("dead").unwrap_err();
+        assert!(error.starts_with("agents.json write failed:"), "{error}");
+        assert_eq!(lists.lock().unwrap().last().cloned(), Some(vec!["dead2".to_owned()]));
+
+        let error = registry.remove("dead2").unwrap_err();
+        assert!(error.starts_with("agents.json write failed:"), "{error}");
+        assert_eq!(lists.lock().unwrap().last().cloned(), Some(Vec::new()));
+        assert!(registry.snapshot().is_empty());
     }
 
     #[test]

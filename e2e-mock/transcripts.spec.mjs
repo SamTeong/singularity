@@ -20,6 +20,28 @@ async function openTranscripts(page) {
   await expect(visible(page.getByText(`${TOTAL_SESSIONS} transcripts`, { exact: true })).first()).toBeVisible();
 }
 
+// Root-picker spy. Counts PUT /transcripts/root — a re-pick of the root already
+// loaded must not write one — and, when `tildeRoot` is given, answers
+// GET /transcripts/root in that spelling instead of the mock's absolute path
+// (the daemon persists the '~' literal on a fresh install).
+async function spyRootPicker(page, { tildeRoot } = {}) {
+  await page.addInitScript((tilde) => {
+    window.__rootPuts = 0;
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      const method = (init?.method || 'GET').toUpperCase();
+      if (url.pathname === '/api/transcripts/root' && method === 'GET' && tilde) {
+        return Promise.resolve(new Response(JSON.stringify({ root: tilde }), { headers: { 'content-type': 'application/json' } }));
+      }
+      if (url.pathname === '/api/transcripts/root' && method === 'PUT') window.__rootPuts += 1;
+      return originalFetch(input, init);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  }, tildeRoot || null);
+}
+
 test('search narrows cross-session, keeps the query on open, and scopes to "This transcript"', async ({ page }) => {
   await openTranscripts(page);
   const search = page.getByPlaceholder('Search transcripts…');
@@ -138,11 +160,61 @@ test('a root switch drops old-root rows and shows loading until the new root lan
   await expect(oldRow).toHaveCount(0);
 });
 
+// A root switch must not wait out the previous root's in-flight scan: the new
+// root lists on its own, and the late old-root response is ignored.
+// VERIFY: transcripts-root-switch-reset
+test('a root switch lists the new root while the old scan is still in flight', async ({ page }) => {
+  await page.addInitScript((corpusRoot) => {
+    window.__listRoots = [];
+    window.__holdCorpusList = false;
+    window.__releaseHeldList = null;
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      const root = url.pathname === '/api/transcripts' ? url.searchParams.get('root') : null;
+      if (root == null) return originalFetch(input, init);
+      window.__listRoots.push(root);
+      if (!window.__holdCorpusList || root !== corpusRoot) return originalFetch(input, init);
+      // Fetch eagerly, withhold only the continuation: releasing this late
+      // corpus response would paint stale rows if it were not ignored.
+      const pending = originalFetch(input, init);
+      return new Promise((resolve) => { window.__releaseHeldList = async () => resolve(await pending); });
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  }, ROOTS.projects);
+
+  await openTranscripts(page);
+  // Restarting the list effect (filter change) issues a fresh corpus request,
+  // which is held from here on.
+  await page.evaluate(() => { window.__holdCorpusList = true; });
+  await page.getByRole('checkbox', { name: 'Hide automated reviews' }).click();
+  await page.waitForFunction(() => typeof window.__releaseHeldList === 'function');
+
+  await page.getByRole('button', { name: 'Browse' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: PROJECT_A }).click();
+  await expect(dialog.getByRole('textbox')).toHaveValue(`~/projects/${PROJECT_A}`);
+  await dialog.getByRole('button', { name: 'Select' }).click();
+
+  // The new root's request is issued while the corpus request is still held —
+  // not deferred until the old request's .finally runs.
+  await page.waitForFunction((p) => window.__listRoots.some((r) => r && r.endsWith(`/${p}`)), PROJECT_A);
+  await expect(visible(page.getByText('No transcripts.', { exact: true })).first()).toBeVisible();
+
+  // The late corpus response belongs to the abandoned effect and cannot repaint.
+  await page.evaluate(() => window.__releaseHeldList());
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await expect(page.getByRole('button', { name: /Fixture session 0\b/ })).toHaveCount(0);
+  await expect(visible(page.getByText('No transcripts.', { exact: true })).first()).toBeVisible();
+});
+
 // Selecting the root already loaded is a no-op, not a root switch: the [root]
 // effect would not re-run, so clearing the corpus would strand the list on
 // "Loading transcripts…" until the next poll and drop the open transcript.
 // VERIFY: transcripts-root-same-noop
 test('re-selecting the current root keeps the loaded corpus and open transcript', async ({ page }) => {
+  await spyRootPicker(page);
   await openTranscripts(page);
   await page.getByRole('button', { name: /Retry backoff cap/ }).click();
   await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();
@@ -154,10 +226,34 @@ test('re-selecting the current root keeps the loaded corpus and open transcript'
   await dialog.getByRole('button', { name: 'Select' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
-  // The buggy pick clears the corpus and flags loading, yet the unchanged root
-  // never re-runs the list effect, so it sits on "Loading…" until the next 15s
-  // poll. Assert immediately (short timeout) that neither symptom appeared.
-  await expect(page.getByText('Loading transcripts…', { exact: true })).toHaveCount(0, { timeout: 2000 });
+  // Observable no-op evidence: the buggy pick persists the root (PUT) and blanks
+  // the corpus before the unchanged [root] effect can restore it. Two paints
+  // after Select, neither symptom may exist.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  expect(await page.evaluate(() => window.__rootPuts)).toBe(0);
+  await expect(visible(page.getByText(`${TOTAL_SESSIONS} transcripts`, { exact: true })).first()).toBeVisible({ timeout: 2000 });
+  await expect(visible(page.getByText(`Retry backoff cap - ${RICH_SESSION}`, { exact: true })).first()).toBeVisible();
+  await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();
+});
+
+// The persisted root can be the '~' literal while the picker hands back an
+// absolute path, so the same-root guard has to compare resolved forms.
+// VERIFY: transcripts-root-same-noop
+test('re-selecting a tilde-spelled current root is still a no-op', async ({ page }) => {
+  await spyRootPicker(page, { tildeRoot: '~/projects' });
+  await openTranscripts(page);
+  await page.getByRole('button', { name: /Retry backoff cap/ }).click();
+  await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Browse' }).click();
+  const dialog = page.getByRole('dialog');
+  // start={untildify(root)} → the absolute corpus root, tildified for display.
+  await expect(dialog.getByRole('textbox')).toHaveValue('~/projects');
+  await dialog.getByRole('button', { name: 'Select' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  expect(await page.evaluate(() => window.__rootPuts)).toBe(0);
   await expect(visible(page.getByText(`${TOTAL_SESSIONS} transcripts`, { exact: true })).first()).toBeVisible({ timeout: 2000 });
   await expect(visible(page.getByText(`Retry backoff cap - ${RICH_SESSION}`, { exact: true })).first()).toBeVisible();
   await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();

@@ -389,14 +389,14 @@ impl CronsService {
 
     // VERIFY: crons-load-tolerant
     /// Retain unrecognized rows so a valid sibling can still run or be updated.
-    fn load(&self) {
+    fn load(&self) -> bool {
         let mut unreadable = self.unreadable_jobs.lock().unwrap();
         let records = match self.read_records() {
             Ok(records) => records,
             Err(error) => {
                 eprintln!("crons.json load failed: {error}");
                 *unreadable = Err(error);
-                return;
+                return false;
             }
         };
         let mut jobs = Vec::new();
@@ -413,6 +413,18 @@ impl CronsService {
         *unreadable = Ok(retained);
         drop(unreadable);
         self.state.lock().unwrap().jobs = jobs;
+        true
+    }
+
+    // VERIFY: crons-load-retry
+    /// Retry under the scheduler lock before staging a mutation.
+    fn retry_unreadable_load(&self) {
+        let blocked = self.unreadable_jobs.lock().unwrap().is_err();
+        if blocked && self.load() {
+            self.recover_pending();
+            self.recompute_enabled();
+            self.emit();
+        }
     }
 
     fn read_records(&self) -> Result<Vec<Value>, String> {
@@ -779,6 +791,7 @@ impl CronsService {
         // concurrent manual runs (or a manual run and a fire) cannot both pass
         // the check and spawn an agent each. No `.await` runs under this guard.
         let _serial = self.scheduler.lock().unwrap();
+        self.retry_unreadable_load();
         let overlap = {
             let state = self.state.lock().unwrap();
             let Some(job) = state.jobs.iter().find(|job| job.id == id) else {
@@ -846,6 +859,7 @@ impl CronsService {
         // between a fire's `beginRun` and `spawnForJob`. Taking the scheduler
         // guard restores that: a fire and a create never interleave.
         let _serial = self.scheduler.lock().unwrap();
+        self.retry_unreadable_load();
         let title = required_string(body, "title").ok_or_else(required_error)?;
         let cron_expression = required_string(body, "cronExpr").ok_or_else(required_error)?;
         let description = required_string(body, "description").ok_or_else(required_error)?;
@@ -954,6 +968,7 @@ impl CronsService {
         // reference, so an update waits for an in-flight fire and then applies
         // on top of the fire's persisted result (it never clobbers it).
         let _serial = self.scheduler.lock().unwrap();
+        self.retry_unreadable_load();
         let mut state = self.state.lock().unwrap();
         let Some(index) = state.jobs.iter().position(|job| job.id == id) else {
             return Err(CronError::NotFound(NO_SUCH_CRON.to_owned()));
@@ -1031,6 +1046,7 @@ impl CronsService {
         // fire cannot spawn from (nor persist) an entry the delete already
         // removed, and the delete cannot be undone by the fire's later write.
         let _serial = self.scheduler.lock().unwrap();
+        self.retry_unreadable_load();
         let mut state = self.state.lock().unwrap();
         let Some(index) = state.jobs.iter().position(|job| job.id == id) else {
             return Err(CronError::NotFound(NO_SUCH_CRON.to_owned()));
@@ -2031,6 +2047,63 @@ mod tests {
             fs::read_to_string(fixture.state_file()).unwrap(),
             "not json"
         );
+    }
+
+    // VERIFY: crons-load-retry-test
+    #[test]
+    fn create_retries_a_repaired_file_and_preserves_its_rows() {
+        let fixture = Fixture::new();
+        fs::write(fixture.state_file(), b"not json").unwrap();
+        let (service, _, _, _) = fixture.setup();
+        service.init(None);
+
+        // Still unreadable at the boundary: refuse and leave the bytes alone.
+        assert!(matches!(
+            service.create(&body(&fixture, "blocked"), None),
+            Err(CronError::Persist(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(fixture.state_file()).unwrap(),
+            "not json"
+        );
+
+        // Repair the document; it holds a valid row and a row this build does
+        // not understand.
+        let repaired = json!({"crons": [
+            {
+                "id": "recovered", "title": "recovered title", "enabled": false,
+                "cronExpr": "0 0 * * *", "description": "p", "cwd": fixture.repo(),
+                "lastSessionId": null, "lastFiredAt": null, "createdAt": 1, "updatedAt": 1
+            },
+            {"id": "unknown", "nonsense": true}
+        ]});
+        fs::write(
+            fixture.state_file(),
+            serde_json::to_string_pretty(&repaired).unwrap(),
+        )
+        .unwrap();
+
+        let created = service.create(&body(&fixture, "new"), None).unwrap();
+        assert_eq!(created["title"], json!("new"));
+        assert_eq!(
+            job(&service.snapshot_value(), "recovered")["title"],
+            json!("recovered title"),
+            "the repaired valid row is loaded instead of overwritten"
+        );
+
+        let stored: Value =
+            serde_json::from_str(&fs::read_to_string(fixture.state_file()).unwrap()).unwrap();
+        let records = stored["crons"].as_array().unwrap();
+        assert!(
+            records.iter().any(|record| record["id"] == "recovered" && record["title"] == "recovered title"),
+            "the recovered valid row survives the create"
+        );
+        assert!(
+            records.contains(&repaired["crons"][1]),
+            "an unknown row is retained on disk"
+        );
+        let created_id = created["id"].as_str().unwrap();
+        assert_eq!(job(&stored["crons"], created_id)["title"], json!("new"));
     }
 
     // VERIFY: crons-load-legacy

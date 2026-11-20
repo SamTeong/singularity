@@ -584,21 +584,23 @@ fn lines(content: &str) -> impl Iterator<Item = &str> {
         .filter(|line| !line.is_empty())
 }
 
+/// A digit-ending prefix must end at a non-digit boundary, so a longer numeric
+/// segment (a different model id or a date suffix) never matches.
+fn matches_prefix(model: &[u16], prefix: &str) -> bool {
+    model.starts_with(&prefix.encode_utf16().collect::<Vec<_>>())
+        && !(prefix.as_bytes().last().is_some_and(u8::is_ascii_digit)
+            && model.get(prefix.len()).is_some_and(|c| (48..=57).contains(c)))
+}
+
 fn price_for(model: &[u16], prompt_tokens: f64) -> Option<(f64, f64, f64)> {
-    if model.starts_with(&"claude-haiku-5-5".encode_utf16().collect::<Vec<_>>())
-        && prompt_tokens > 100_000.0
-    {
+    if matches_prefix(model, "claude-haiku-5-5") && prompt_tokens > 100_000.0 {
         return Some((0.5, 2.5, 0.1));
     }
     let mut prices = PRICES.to_vec();
     prices.sort_by_key(|price| std::cmp::Reverse(price.0.len()));
     prices
         .into_iter()
-        .find(|price| {
-            model.starts_with(&price.0.encode_utf16().collect::<Vec<_>>())
-                && !(price.0.as_bytes().last().is_some_and(u8::is_ascii_digit)
-                    && model.get(price.0.len()).is_some_and(|c| (48..=57).contains(c)))
-        })
+        .find(|price| matches_prefix(model, price.0))
         .map(|(_, input, output, mult)| (input, output, mult))
 }
 
@@ -1087,6 +1089,30 @@ mod tests {
             let expected = (99000.0 * input + f64::from(cached) * input * 0.1 + 100.0 * output) / 1e6;
             assert!((parse_claude_text(&content).est_cost_usd.unwrap().0 - expected).abs() < 1e-12);
         }
+    }
+
+    #[test]
+    fn haiku_long_tier_respects_numeric_version_boundary() {
+        // promptTokens = input + cache_read + cache_creation, so this crosses the
+        // 100k boundary; a longer numeric segment is a different model id though.
+        let long_prompt = |model: &str| {
+            parse_claude_text(
+                &serde_json::json!({"type":"assistant","message":{"model":model,"usage":{
+                    "input_tokens":99000,"output_tokens":100,"cache_read_input_tokens":1001
+                }}})
+                .to_string(),
+            )
+            .est_cost_usd
+        };
+        let expected = (99000.0 * 0.5 + 1001.0 * 0.5 * 0.1 + 100.0 * 2.5) / 1e6;
+        for model in ["claude-haiku-5-5", "claude-haiku-5-5-20261119"] {
+            let actual = long_prompt(model).unwrap().0;
+            assert!((actual - expected).abs() < 1e-12, "{model}");
+        }
+        assert!(
+            long_prompt("claude-haiku-5-55").is_none(),
+            "a longer numeric segment must not take the Haiku 5.5 shortcut"
+        );
     }
 
     #[test]

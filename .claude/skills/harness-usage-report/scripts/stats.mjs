@@ -590,9 +590,9 @@ export function _price_key(model) {
 // anymore, so this derives from the key name shape instead (still covers custom
 // override keys like "opus-5-5"). Unpriced (null key) is never third-party —
 // there's nothing to recompute from.
-function _is_third_party(model) {
+export function _is_third_party(model) {
   const key = _price_key(model);
-  return key !== null && !/^(opus|sonnet|haiku|fable|claude-3-5-haiku)/.test(key);
+  return key !== null && !/^(opus|sonnet|haiku|fable|claude-)/.test(key);
 }
 
 function _msg_cost(model, i, o, cr, cc) {

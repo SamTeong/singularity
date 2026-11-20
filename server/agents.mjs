@@ -571,18 +571,34 @@ export async function reattach(id) {
   if (!a) return a;
   return track(id, async () => {
     a.gen = (a.gen || 0) + 1; // new generation: the old pty's exit cleanup must not touch it
-    const modelRoute = await getModelRoute(a.model, a.tool);
-    const { bin, args } = await buildSpawn(a, undefined, modelRoute);
-    ensureTrusted(a.cwd);
-    if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
-    if (canceled.has(id)) throw new Error('session was removed during spawn');
-    const proc = await ptyBackend.spawn({ id, bin, args, cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock) });
-    if (canceled.has(id)) { discardProc(proc, id); throw new Error('session was removed during spawn'); }
-    a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
-    wire(a);
-    persist();
-    emitList();
-    return a;
+    try {
+      const modelRoute = await getModelRoute(a.model, a.tool);
+      const { bin, args } = await buildSpawn(a, undefined, modelRoute);
+      ensureTrusted(a.cwd);
+      if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
+      if (canceled.has(id)) throw new Error('session was removed during spawn');
+      const proc = await ptyBackend.spawn({ id, bin, args, cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock) });
+      if (canceled.has(id)) { discardProc(proc, id); throw new Error('session was removed during spawn'); }
+      a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
+      wire(a);
+      persist();
+      emitList();
+      return a;
+    } catch (error) {
+      // VERIFY: reattach-failure-exit-cleanup
+      // The generation bump above disarmed a concurrently exited pty's pending
+      // onExit cleanup (current() is now false). A failed reattach must finish
+      // that cleanup for the generation it claimed — but only while the entry is
+      // still this exact dead 'exited' one. A newer/live entry, an ordinary
+      // detached row (retryable), or a row another operation already removed is
+      // not ours to drop.
+      if (agents.get(id) === a && !a.proc && a.status === 'exited') {
+        agents.delete(id);
+        try { persist(); } catch { /* exit cleanup is best-effort, like onExit's */ }
+        emitList();
+      }
+      throw error;
+    }
   });
 }
 
@@ -680,6 +696,9 @@ function cancelPending(id) {
 export function kill(id) {
   const a = agents.get(id);
   if (!a) { cancelPending(id); return; } // pending fresh create: never publish it
+  // An explicit kill cancels a respawn still awaiting its Codex identity lookup,
+  // not only one that already armed respawnAfterExit (see respawn).
+  a.respawnAttempt = null;
   // VERIFY: respawn-cancel-before-exit
   // An explicit kill cancels a theme respawn queued by respawn() that has not
   // fired yet; onExit would otherwise start the replacement it prefers.
@@ -698,7 +717,8 @@ export function kill(id) {
 export function remove(id) {
   const a = agents.get(id);
   if (!a) { cancelPending(id); return; } // pending fresh create: never publish it
-  // Same explicit cancel as kill(): a queued respawn must not outlive remove().
+  // Same explicit cancel as kill(), including a respawn still in its lookup.
+  a.respawnAttempt = null;
   if (a.proc) { a.respawnAfterExit = null; a.removeOnExit = true; killPty(a.proc, id); return; } // onExit -> delete
   cancelPending(id); // pending reattach: discard the pty it is about to attach
   agents.delete(id);
@@ -711,11 +731,23 @@ export function remove(id) {
 export async function respawn(id) {
   const a = agents.get(id);
   if (!a?.proc) return false;
+  const proc = a.proc;
+  // This attempt's cancel token, armed synchronously before the first await.
+  // kill()/remove() clear it; a later respawn installs its own token, so one
+  // cancel affects only the attempt it interrupted.
+  const attempt = {};
+  a.respawnAttempt = attempt;
   // Pin the codex thread while the agent is still live: discovery after the kill
   // can drift to a newer codex thread in the same cwd (see rememberCodexThread).
   const threadId = await rememberCodexThread(a);
+  // VERIFY: respawn-cancel-during-lookup
+  // A kill/remove landing in the lookup cleared the token; checking it first is
+  // required because a killed pty is still a.proc until its onExit fires.
+  const current = a.respawnAttempt === attempt;
+  if (current) a.respawnAttempt = null; // never clear a newer attempt's token
+  if (!current || a.proc !== proc || agents.get(id) !== a) return false;
   a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt, threadId: threadId || undefined };
-  killPty(a.proc, id);
+  killPty(proc, id);
   return true;
 }
 

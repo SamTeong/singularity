@@ -303,12 +303,20 @@ fn etag_matches(candidate: &str, etag: &str) -> bool {
 /// `send`'s `isPreconditionFailure`: `If-Match` then `If-Unmodified-Since`, both
 /// evaluated; either failing is a 412. A date that does not parse is ignored.
 fn precondition_failed(headers: &HeaderMap, etag: &str, last_modified: &str) -> bool {
-    if let Some(if_match) = header_str(headers, "if-match") {
-        if if_match != "*"
-            && !if_match
-                .split(',')
-                .any(|candidate| etag_matches(candidate.trim(), etag))
-        {
+    // Repeated `If-Match` lines are one comma-joined list (RFC 9110 §13.1.1).
+    let if_match: Vec<&str> = headers
+        .get_all("if-match")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect();
+    if !if_match.is_empty() {
+        let matched = (if_match.len() == 1 && if_match[0] == "*")
+            || if_match.iter().any(|value| {
+                value
+                    .split(',')
+                    .any(|candidate| etag_matches(candidate.trim(), etag))
+            });
+        if !matched {
             return true;
         }
     }
@@ -1369,6 +1377,47 @@ mod tests {
             assert_eq!(head.status(), StatusCode::PRECONDITION_FAILED);
             assert_eq!(header_value(&head, "content-length").as_deref(), Some("80"));
             assert!(head.bytes().await.unwrap().is_empty());
+            stop.send(()).unwrap();
+        });
+    }
+
+    #[test]
+    fn http_shell_asset_repeated_if_match_lines_form_one_list() {
+        let fixture = Fixture::new("if-match-list");
+        run(async {
+            let (address, stop) = serve(&fixture, None).await;
+            let url = format!("http://{address}/assets/app.js");
+            let body = "console.log(1)\n";
+            let first = client().get(&url).send().await.unwrap();
+            let etag = header_value(&first, "etag").unwrap();
+            let strong_etag = etag.strip_prefix("W/").unwrap().to_owned();
+            first.bytes().await.unwrap();
+
+            for (first, second) in [
+                ("\"other\"", etag.as_str()),
+                ("\"other\"", strong_etag.as_str()),
+                ("\"a\", \"b\"", etag.as_str()),
+            ] {
+                let response = client()
+                    .get(&url)
+                    .header("if-match", first)
+                    .header("if-match", second)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK, "{first} + {second}");
+                assert_eq!(response.text().await.unwrap(), body, "{first} + {second}");
+            }
+
+            let response = client()
+                .get(&url)
+                .header("if-match", "\"a\"")
+                .header("if-match", "\"b\"")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED);
+            response.bytes().await.unwrap();
             stop.send(()).unwrap();
         });
     }

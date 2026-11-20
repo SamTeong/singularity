@@ -53,7 +53,9 @@ Native `--http` mode runs Axum directly, with its own routes, WebSockets,
 shell delivery, lifecycle, PTYs and state services.
 
 The default executable is `rust/backend/target/release/singularity-backend`
-(`.exe` on Windows). Cargo honors `CARGO_TARGET_DIR` for native startup.
+(`.exe` on Windows). When `CARGO_TARGET_DIR` is set, both hosts resolve the
+binary under `<CARGO_TARGET_DIR>/release/`; a relative value is resolved against
+the checkout, matching the build helper's working directory.
 The Fastify request bridge supports `SINGULARITY_RUST_BACKEND_BINARY`.
 Native test tools use `SINGULARITY_NATIVE_BIN`.
 

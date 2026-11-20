@@ -18,6 +18,7 @@ fs.writeFileSync(path.join(fixtureDir, "pricing.json"), JSON.stringify({
     "gpt-6-sol": [2.0, 10.0, 0.20, 2.50],
     "gpt-6-luna": [0.10, 0.50, 0.01, 0.125],
     "gpt-5.6-sol": [4.0, 20.0, 0.40, 5.0],
+    "claude-3-5-sonnet": [3.0, 15.0, 0.3, 3.75],
     opus: [5.0, 25.0, 0.5, 6.25],
     sonnet: [3.0, 15.0, 0.3, 3.75],
   },
@@ -31,7 +32,7 @@ fs.writeFileSync(path.join(fixtureDir, "pricing.json"), JSON.stringify({
   default_key: "opus",
 }, null, 2));
 
-const { _has_newer_input, _load_usage_snapshots, _msg_cost_tiered, _parse_reset_at, _price_key } = await import("./stats.mjs");
+const { _has_newer_input, _is_third_party, _load_usage_snapshots, _msg_cost_tiered, _parse_reset_at, _price_key } = await import("./stats.mjs");
 
 // resets_at arrives as epoch seconds (daemon live poll), epoch ms, a digit
 // string, or RFC3339 (codex.mjs rollout ingestion); all normalize to epoch s.
@@ -51,6 +52,9 @@ assert.equal(_msg_cost_tiered("gpt-6-luna", 272001, 0, 0, 0), 0.0544002);
 assert.equal(_msg_cost_tiered("gpt-5.6-sol", 200001, 0, 0, 0), 1.600008);
 // default_key fallback: an unrecognized model resolves to pricing.json's default_key.
 assert.equal(_price_key("some-unrecognized-model"), "opus");
+assert.equal(_price_key("claude-3-5-sonnet-20241022"), "claude-3-5-sonnet");
+assert.equal(_is_third_party("claude-3-5-sonnet-20241022"), false);
+assert.equal(_is_third_party("gpt-6-sol"), true);
 console.log("ok");
 
 // No pricing.json at all => every model unpriced (null key, null cost), never a throw.
