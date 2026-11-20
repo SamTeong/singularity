@@ -3,9 +3,11 @@
 //!
 //! The daily History service owns scanning, summarization and persistence;
 //! this module only coerces the query/body the way Node's Fastify route does
-//! (`Number(req.query.days) || 7`, `req.body?.date`) and maps failures to the
-//! same `{ok:false, error}` bodies. The host merges [`router`] into the `/api`
-//! tree after `http_server`'s auth/origin layers.
+//! (`Number(req.query.days) || 7`, `req.body?.date`). Regenerate failures keep
+//! the route's `{ok:false, error}` body; an uncaught GET failure falls through
+//! to Fastify's default error handler, so it answers the default 500 envelope.
+//! The host merges [`router`] into the `/api` tree after `http_server`'s
+//! auth/origin layers.
 use crate::history::{HistoryQuery, HistoryService, normalize_days};
 use crate::http_body::parse;
 use crate::http_policy::query_values;
@@ -149,10 +151,16 @@ fn bad_request(message: &str) -> Response {
         .into_response()
 }
 
+// Fastify's default error envelope: the GET handler has no `try`/`catch`, so a
+// thrown service error leaves `{statusCode, error, message}`.
 fn internal_error(message: &str) -> Response {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({ "ok": false, "error": message })),
+        Json(json!({
+            "statusCode": 500,
+            "error": "Internal Server Error",
+            "message": message,
+        })),
     )
         .into_response()
 }
@@ -160,6 +168,116 @@ fn internal_error(message: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::Bus;
+    use crate::history::{
+        Clock, DaySummariser, HistoryBins, HistoryDeps, ModelStore, SessionMessages,
+        SessionTotals, SummaryAnswer, SummaryModel, TranscriptSession, TranscriptSource,
+    };
+    use std::future::Future;
+    use std::pin::Pin;
+
+    const LIST_FAILURE: &str = "transcript list exploded";
+
+    struct FailingSource;
+
+    impl TranscriptSource for FailingSource {
+        fn list(&self, _root: Option<&str>, _cap: usize) -> Result<Vec<TranscriptSession>, String> {
+            Err(LIST_FAILURE.to_owned())
+        }
+        fn read_session(&self, _row: &TranscriptSession, _root: Option<&str>) -> SessionMessages {
+            SessionMessages::default()
+        }
+        fn totals(&self, _row: &TranscriptSession, _root: Option<&str>) -> SessionTotals {
+            SessionTotals::default()
+        }
+    }
+
+    struct FixedClock;
+
+    impl Clock for FixedClock {
+        fn now_ms(&self) -> f64 {
+            0.0
+        }
+        fn now_iso(&self) -> String {
+            "1970-01-01T00:00:00.000Z".to_owned()
+        }
+        fn local_day(&self, _ts_ms: f64) -> String {
+            "1970-01-01".to_owned()
+        }
+        fn start_of_local_day_ms(&self, _ts_ms: f64) -> f64 {
+            0.0
+        }
+        fn start_of_local_day_ymd(&self, _year: i32, _month: u8, _day: u8) -> Option<f64> {
+            Some(0.0)
+        }
+    }
+
+    struct NoSummariser;
+
+    impl DaySummariser for NoSummariser {
+        fn call<'a>(
+            &'a self,
+            _prompt: &'a str,
+            _model: &'a SummaryModel,
+        ) -> Pin<Box<dyn Future<Output = Result<SummaryAnswer, String>> + Send + 'a>> {
+            Box::pin(async { Err("no summariser".to_owned()) })
+        }
+    }
+
+    struct NoModels;
+
+    impl ModelStore for NoModels {
+        fn summariser_model(&self) -> Option<SummaryModel> {
+            None
+        }
+    }
+
+    fn failing_service() -> Arc<HistoryService> {
+        let root = std::env::temp_dir().join(format!(
+            "singularity-history-error-{}",
+            std::process::id()
+        ));
+        HistoryService::new(HistoryDeps {
+            state_dir: root.join("state"),
+            usage_state: root.join("usage"),
+            home: root.join("home"),
+            bins: HistoryBins::default(),
+            bus: Bus::new(),
+            clock: Arc::new(FixedClock),
+            transcripts: Arc::new(FailingSource),
+            summariser: Arc::new(NoSummariser),
+            models: Arc::new(NoModels),
+        })
+    }
+
+    // VERIFY: history-get-failure-fastify-envelope
+    #[test]
+    fn get_failure_returns_the_fastify_500_envelope() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let response = history_get(
+                State(failing_service()),
+                RawQuery(Some("days=3".to_owned())),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let payload: Value = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(
+                payload,
+                json!({
+                    "statusCode": 500,
+                    "error": "Internal Server Error",
+                    "message": LIST_FAILURE,
+                })
+            );
+        });
+    }
 
     #[test]
     fn days_coerces_like_number_or_seven() {

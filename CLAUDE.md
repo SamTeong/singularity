@@ -1,6 +1,6 @@
 # Singularity — Claude Code Configuration
 
-Local web UI — control plane for a fleet of coding agents (spec-driven dev). Browser shell + loopback Node daemon (Fastify + ws).
+Local web UI for coding agents. Browser shell + loopback Rust/Axum daemon.
 
 ## Run
 
@@ -8,6 +8,7 @@ Local web UI — control plane for a fleet of coding agents (spec-driven dev). B
 pnpm install         # deps + postinstall
 pnpm start           # build web + serve on http://127.0.0.1:4317
 pnpm dev             # daemon (:4317) + Vite (:5317); browse 127.0.0.1:5317
+pnpm start:node      # build web + serve through Fastify
 pnpm dev-mock        # UI only, no daemon/.env: Vite (:5317) + in-browser mock backend
 pnpm test            # node --test --test-force-exit "server/*.test.mjs" "web/src/**/*.test.mjs"
 pnpm test:e2e-mock   # build:mock + parallel Playwright suite in e2e-mock/
@@ -27,7 +28,7 @@ Before finishing code changes: `pnpm lint && pnpm test`.
 ## Invariants
 
 - **Never restart the live daemon (:4317) or Vite (:5317).** This session usually runs inside it. Probe with an isolated daemon (own `SINGULARITY_HOME` + `DAEMON_PORT`).
-- **New server route:** add it in `server/index.mjs`, add the module, a co-located `*.test.mjs`, **and** a handler in `web/src/mock/routes/`. Mirage throws on unhandled requests.
+- **New server route:** mount it in `rust/backend/src/http_server.rs` and `server/index.mjs`. Add co-located tests and a handler in `web/src/mock/routes/`.
 - HTTP API lives under `/api`. `/ws`, `GET /` and `/assets/*` stay at root. The root namespace belongs to UI views (real URLs, catalog in `web/src/shell/views.mjs`).
 - New state goes through `reg` (`agents.mjs`) / `server/app-dir.mjs`. Never hardcode `~/.singularity`.
 - `claude`/`ollama` are invoked only via absolute `CLAUDE_BIN`/`OLLAMA_BIN` (no PATH fallback).

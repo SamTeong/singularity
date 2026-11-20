@@ -33,9 +33,10 @@
 //! - The empty `tasks`/`crons`/`background` snapshots are the native placeholders
 //!   the host wires in later (`{tasks:[],history:[]}`, `[]`, and
 //!   background's module-initial state).
-//! - Client messages are handled one at a time in the socket task, so replies
-//!   stay in receive order; Node's `async` handler may interleave two
-//!   concurrent registry calls.
+//! - Client messages are handled one at a time by a per-socket command task, so
+//!   replies stay in receive order while the socket loop keeps fan-out frames,
+//!   the heartbeat and close handling moving; Node runs each `async` handler
+//!   concurrently and may interleave two registry calls.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -226,13 +227,32 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
     let mut anchor_task = tokio::task::spawn_blocking(move || anchor_frame(&anchor));
     let mut anchored = false;
 
-    let mut client = Client {
-        registry: state.registry.clone(),
-        chat: state.chat.clone(),
-        attached,
-        tx,
-        cancel: None,
-    };
+    // Node registers an `async` message handler (`pty-ws.mjs:134`) that runs
+    // alongside the fan-out, so a slow `reg.create` never stalls the socket's
+    // outbound frames. Keep that property here: one command task per socket
+    // serializes `handle` (receive order, one at a time) while the select loop
+    // below stays free to forward bus frames, heartbeats and close frames.
+    // VERIFY: wave10-ws_order-1 — replies share the frame channel with the bus
+    // listener, so the `list` a handler causes still precedes its reply.
+    let (command_tx, mut commands) = mpsc::channel::<String>(32);
+    let cancel: Arc<Mutex<Option<Cancel>>> = Arc::new(Mutex::new(None));
+    let command_task = tokio::spawn({
+        let mut client = Client {
+            registry: state.registry.clone(),
+            chat: state.chat.clone(),
+            attached: attached.clone(),
+            tx: tx.clone(),
+            cancel: cancel.clone(),
+        };
+        let replies = tx.clone();
+        async move {
+            while let Some(raw) = commands.recv().await {
+                for reply in client.handle(&raw).await {
+                    let _ = replies.send(reply);
+                }
+            }
+        }
+    });
     let mut session = SendState {
         initializing: true,
         ..SendState::default()
@@ -307,9 +327,10 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
             message = socket.recv() => {
                 match message {
                     Some(Ok(Message::Text(text))) => {
-                        let replies = client.handle(text.as_str()).await;
-                        let replies = queued_then(&mut frames, replies);
-                        if !deliver_all(&mut session, socket, replies).await {
+                        // Queued, never awaited: the command task drains it in
+                        // receive order while this loop keeps sending frames.
+                        if command_tx.try_send(text.to_string()).is_err() {
+                            let _ = close(socket, 1013, "command backlog exceeded").await;
                             open = false;
                         }
                     }
@@ -317,9 +338,8 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
                     // decoded as text too.
                     Some(Ok(Message::Binary(bytes))) => {
                         let raw = String::from_utf8_lossy(&bytes).into_owned();
-                        let replies = client.handle(&raw).await;
-                        let replies = queued_then(&mut frames, replies);
-                        if !deliver_all(&mut session, socket, replies).await {
+                        if command_tx.try_send(raw).is_err() {
+                            let _ = close(socket, 1013, "command backlog exceeded").await;
                             open = false;
                         }
                     }
@@ -342,6 +362,7 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
                     // before the transport is dropped — otherwise the peer
                     // observes 1006/EOF.
                     Some(Ok(Message::Close(_))) => {
+                        command_task.abort();
                         let _ = socket.flush().await;
                         open = false;
                     }
@@ -362,44 +383,18 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
         }
     }
 
+    // Drop queued work when the transport closes. A registry operation that
+    // already entered spawn_blocking can still finish.
+    command_task.abort();
+    let _ = command_task.await;
     // `ws.on('close', ...)` (`:199-205`).
-    if let Some(cancel) = client.cancel.take() {
-        cancel.cancel();
+    if let Some(previous) = cancel.lock().unwrap().take() {
+        previous.cancel();
     }
     state.registry.bus().unsubscribe(subscription);
 }
 
 // VERIFY: wave10-ws_order-1
-/// Node runs a handler synchronously, so bus frames it emitted (e.g. the
-/// `list` from `reg.create`) reach the wire before its direct replies
-/// (`pty-ws.mjs:139-158`). Drain what the handler queued first.
-fn queued_then(
-    frames: &mut mpsc::UnboundedReceiver<Arc<str>>,
-    replies: Vec<Arc<str>>,
-) -> Vec<Arc<str>> {
-    let mut out: Vec<Arc<str>> = std::iter::from_fn(|| frames.try_recv().ok()).collect();
-    out.extend(replies);
-    out
-}
-
-async fn deliver_all(
-    session: &mut SendState,
-    socket: &mut WebSocket,
-    frames: Vec<Arc<str>>,
-) -> bool {
-    for frame in frames {
-        match deliver(session, socket, frame).await {
-            Delivery::Sent | Delivery::Queued => {}
-            Delivery::Overflow => {
-                let _ = close(socket, 1013, "initial snapshot backlog exceeded").await;
-                return false;
-            }
-            Delivery::Closed => return false,
-        }
-    }
-    true
-}
-
 /// Resolves when the host broadcasts shutdown. Without a channel (tests) or
 /// after the sender is dropped it pends forever instead of closing the socket.
 async fn shutdown_signal(shutdown: &mut Option<tokio::sync::watch::Receiver<bool>>) {
@@ -545,7 +540,8 @@ struct Client {
     chat: Arc<ChatDeps>,
     attached: Arc<Mutex<HashSet<String>>>,
     tx: mpsc::UnboundedSender<Arc<str>>,
-    cancel: Option<Cancel>,
+    /// Shared with the socket loop, which aborts the chat on close (`:200`).
+    cancel: Arc<Mutex<Option<Cancel>>>,
 }
 
 impl Client {
@@ -618,7 +614,7 @@ impl Client {
             }
             "chat" => self.start_chat(&message),
             "chat:stop" => {
-                if let Some(cancel) = self.cancel.take() {
+                if let Some(cancel) = self.cancel.lock().unwrap().take() {
                     cancel.cancel();
                 }
                 Vec::new()
@@ -716,11 +712,11 @@ impl Client {
     fn start_chat(&mut self, message: &Value) -> Vec<Arc<str>> {
         // One in-flight chat per socket: a new request cancels the prior
         // (`:164-165`).
-        if let Some(previous) = self.cancel.take() {
+        if let Some(previous) = self.cancel.lock().unwrap().take() {
             previous.cancel();
         }
         let cancel = Cancel::new();
-        self.cancel = Some(cancel.clone());
+        *self.cancel.lock().unwrap() = Some(cancel.clone());
         // VERIFY: wave12-chat_auth_first-3 — `streamChat` awaits
         // `claudeOauthToken()` before destructuring the payload
         // (`chat.mjs:98-103`), so a signed-out daemon answers `needsAuth` for
@@ -804,6 +800,7 @@ mod tests {
 
     use crate::agent_registry::{PtyPort, RegistryConfig};
     use crate::agent_spawn::{Bins, LaunchSpec, SpawnPaths};
+    use crate::agent_wire::Status;
     use crate::bus::Bus;
     use crate::pty::PtyEvent;
     use crate::transcript_service::{Inputs, TranscriptService};
@@ -812,6 +809,7 @@ mod tests {
     use std::net::SocketAddr;
     use std::path::PathBuf;
     use std::sync::atomic::AtomicU32;
+    use std::sync::Condvar;
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
@@ -917,11 +915,48 @@ mod tests {
         }
     }
 
+    /// Holds a fake spawn until the test opens it, so a slow registry call can
+    /// be observed while it is still in flight.
+    #[derive(Default)]
+    struct SpawnGate {
+        entered: std::sync::atomic::AtomicBool,
+        open: Mutex<bool>,
+        changed: Condvar,
+    }
+
+    impl SpawnGate {
+        fn block(&self) {
+            self.entered.store(true, Ordering::SeqCst);
+            let mut open = self.open.lock().unwrap();
+            while !*open {
+                let (next, timeout) = self
+                    .changed
+                    .wait_timeout(open, Duration::from_secs(10))
+                    .unwrap();
+                open = next;
+                // A failing test must not wedge the suite on a stuck spawn.
+                if timeout.timed_out() {
+                    break;
+                }
+            }
+        }
+
+        fn entered(&self) -> bool {
+            self.entered.load(Ordering::SeqCst)
+        }
+
+        fn release(&self) {
+            *self.open.lock().unwrap() = true;
+            self.changed.notify_all();
+        }
+    }
+
     #[derive(Default)]
     struct FakePort {
         writes: Mutex<Vec<(String, Vec<u8>)>>,
         generations: Mutex<HashMap<String, u64>>,
         next_pid: AtomicU32,
+        spawn_gate: Mutex<Option<Arc<SpawnGate>>>,
     }
 
     impl FakePort {
@@ -930,6 +965,14 @@ mod tests {
                 next_pid: AtomicU32::new(1000),
                 ..Self::default()
             })
+        }
+
+        /// Makes the next (and every) spawn block until the returned gate is
+        /// released.
+        fn gate_spawn(&self) -> Arc<SpawnGate> {
+            let gate = Arc::new(SpawnGate::default());
+            *self.spawn_gate.lock().unwrap() = Some(gate.clone());
+            gate
         }
 
         fn generation(&self, id: &str) -> u64 {
@@ -948,6 +991,10 @@ mod tests {
 
     impl PtyPort for FakePort {
         fn spawn(&self, id: &str, generation: u64, _spec: LaunchSpec) -> Result<u32, String> {
+            let gate = self.spawn_gate.lock().unwrap().clone();
+            if let Some(gate) = gate {
+                gate.block();
+            }
             self.generations
                 .lock()
                 .unwrap()
@@ -1459,6 +1506,98 @@ mod tests {
             assert_eq!(
                 client.json().await,
                 json!({ "t": "txmeta", "id": "missing", "written": 0, "ringMax": RING_MAX })
+            );
+        });
+    }
+
+    // VERIFY: wave22-ws_starvation-1 — Node runs each `ws.on('message')`
+    // handler concurrently with the fan-out (`pty-ws.mjs:134`), so a slow
+    // `reg.create` never starves outbound frames. The socket loop must keep
+    // delivering while the command task awaits the registry.
+    #[test]
+    fn outbound_frames_keep_flowing_while_a_create_blocks() {
+        slow_create(false);
+    }
+
+    #[test]
+    fn disconnect_discards_commands_queued_behind_a_slow_create() {
+        slow_create(true);
+    }
+
+    fn slow_create(disconnect: bool) {
+        run(async {
+            let fixture = Fixture::new();
+            let port = FakePort::new();
+            let gate = port.gate_spawn();
+            let registry = fixture.registry(port);
+            let server = serve(deps(
+                &fixture,
+                registry.clone(),
+                Arc::new(AtomicUsize::new(0)),
+                None,
+            ))
+            .await;
+            let mut client = RawClient::connect(server.address, "/ws").await;
+            let _ = snapshot(&mut client).await;
+
+            client
+                .send_text(
+                    &json!({
+                        "t": "create",
+                        "cwd": fixture.repo(),
+                        "title": "demo",
+                        "model": "claude",
+                        "sessionId": "blocked",
+                    })
+                    .to_string(),
+                )
+                .await;
+            for _ in 0..200 {
+                if gate.entered() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(gate.entered(), "create never reached the fake spawn");
+
+            // The create is stuck inside the fake spawn; a bus frame emitted
+            // now must still reach the wire.
+            registry.bus().emit(&BusEvent::Status {
+                id: "ghost".to_owned(),
+                status: Status::Running,
+            });
+            let frame = tokio::time::timeout(Duration::from_secs(2), client.json()).await;
+            assert_eq!(
+                frame.expect("a bus frame while create is blocked"),
+                json!({ "t": "status", "id": "ghost", "status": "running" })
+            );
+
+            if disconnect {
+                client.send_text(&json!({
+                    "t": "create", "cwd": fixture.repo(), "title": "queued",
+                    "model": "claude", "sessionId": "queued"
+                }).to_string()).await;
+                client.send_frame(0x8, &1000u16.to_be_bytes()).await;
+                assert_eq!(client.close().await.0, 1000);
+                gate.release();
+                for _ in 0..200 {
+                    if registry.is_live("blocked") {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                assert!(registry.is_live("blocked"));
+                assert!(!registry.snapshot().iter().any(|agent| agent.id == "queued"));
+                return;
+            }
+
+            gate.release();
+            // The released create still emits `list` before its `attached`
+            // reply (wave10-ws_order-1).
+            assert_eq!(client.json().await["t"], "list");
+            assert_eq!(
+                client.json().await,
+                json!({ "t": "attached", "id": "blocked" })
             );
         });
     }

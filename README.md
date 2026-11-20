@@ -12,17 +12,17 @@ Windows also needs Visual Studio C++ Build Tools (MSVC).
 ```
 pnpm bootstrap       # run on first setup to generate .env (CLAUDE_BIN is detected) + wire usage-report + install + start
 pnpm install         # installs dependencies, runs postinstall hook
-pnpm start           # build web + Rust; serve through Node/Fastify on http://127.0.0.1:4317
-pnpm start:rust      # build web + Rust; serve directly through the native Axum daemon
+pnpm start           # build web + Rust; serve through Axum on http://127.0.0.1:4317
+pnpm start:node      # build web + Rust; serve through Node/Fastify
 pnpm build           # build web only (vite build → web/dist); serve separately with `pnpm server`
 pnpm test            # build Rust, then run all Node unit/integration test groups
 pnpm clean           # reap orphan esbuild/vite procs (fixes build hangs before a fresh build)
 ```
 
-The default Node daemon now delegates migrated services and PTYs to Rust
-subprocesses. Native Rust HTTP is an explicit `start:rust` mode; Node HTTP has
-not been removed. See [Backend runtime and Rust migration](docs/backend.md) for
-ownership, settings, compatibility and native verification.
+The default daemon runs on Rust/Axum. `pnpm start:rust` is an alias for
+`pnpm start`. The Fastify host uses Rust subprocesses for migrated services
+and PTYs. See [Backend runtime and Rust migration](docs/backend.md) for
+settings and verification.
 
 Dev (with live-reload web):
 
@@ -30,11 +30,12 @@ Dev (with live-reload web):
 pnpm dev             # daemon (127.0.0.1:4317) + Vite (127.0.0.1:5317) → browse UI at 127.0.0.1:5317
 ```
 
-Vite proxies `/ws` and all REST requests to daemon. Run components separately with `pnpm server` / `pnpm web`.
+Vite proxies `/ws` and REST requests to the daemon. Run the Axum daemon with
+`pnpm server`, the Fastify daemon with `pnpm server:node`, or Vite with `pnpm web`.
 
-The default HTTP host mounts routes in `server/index.mjs`; migrated service logic
-lives in `rust/backend`. New server route → also add its prefix to the Vite dev
-proxy (`web/vite.config.mjs`), or dev falls through to the SPA shell.
+Axum mounts routes in `rust/backend/src/http_server.rs`. Fastify mounts them
+in `server/index.mjs`. Vite proxies the `/api` and `/ws` prefixes in
+`web/vite.config.mjs`.
 
 ## Testing
 
@@ -113,7 +114,7 @@ served shell so the UI works transparently.
 
 ## Notes
 
-- `CLAUDE_BIN` must be an **absolute path** in `.env` for the default Node daemon — it validates the executable path rather than resolving it from PATH. `pnpm bootstrap` detects it for you; otherwise set it by hand.
+- Set `CLAUDE_BIN` to an **absolute path** in `.env`. `pnpm bootstrap` attempts to detect the executable.
 - App data (registry, tasks, cron jobs, picker roots) lives under `SINGULARITY_HOME` (set in `.env`; `pnpm bootstrap` defaults it to `~/.singularity`). Git worktrees + ticket requirements/plans (`.worktrees/`, `.tickets/<id>/`) live at the repo root, or `SING_TRUSTED_ROOT` if set (trusted, gitignored) so Claude honors the repo's permission rules.
 - Per-session cost is shown as **turns + total tokens + `$`** — the dollar figure comes from the global statusline (`harness-usage-report` skill), the single source of truth for every session; a pricing-table estimate is the fallback when no statusline cost exists. `pnpm bootstrap` wires that cost capture (SessionEnd hook + statusline into `~/.claude/settings.json`); it skips a statusline you already have and never fails bootstrap if the wiring can't be written. Report generation is native — no skill path is configured. Reports land in `SING_USAGE_REPORTS` when set, else `<dirname(USAGE_REPORT_STATE || ~/.agents/.harness-usage-report/state)>/reports`.
 - The UI theme (`@zapac/mui-theme`) is vendored as a tgz in `vendor/`, so `pnpm install` works anywhere — no external path dependency.

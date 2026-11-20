@@ -43,7 +43,7 @@ use serde::{Serialize, Serializer};
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// `Number(req.query.cap) || 5000` (`server/transcript-routes.mjs:4`).
@@ -99,6 +99,9 @@ pub trait TranscriptRegistry: Send + Sync {
 /// parser's model labels and cost estimates.
 pub struct TranscriptHost {
     pub state_dir: PathBuf,
+    /// List metadata persists to `cache_dir/transcript-meta.json`, the same file
+    /// the stdio bridge uses (`transcript_bridge.rs:110-112`).
+    pub cache_dir: Option<PathBuf>,
     pub claude_home: PathBuf,
     pub codex_home: PathBuf,
     /// `USAGE_SKILL_STATE` (`server/app-dir.mjs:28`); its `cost-state/` directory
@@ -111,9 +114,10 @@ pub struct TranscriptHost {
 struct Inner {
     host: TranscriptHost,
     /// The service caches transcript metadata and search text, so it must outlive
-    /// a request; Node keeps one alive for the whole daemon. Rebuilt only when the
-    /// model catalogue changes, exactly like `transcript_bridge.rs:73-85`.
-    service: Mutex<Option<(String, Arc<TranscriptService>)>>,
+    /// a request; Node keeps one alive for the whole daemon. A catalog edit swaps
+    /// it in place so the metadata cache survives, exactly like
+    /// `transcript_bridge.rs:88-112`.
+    service: Mutex<Option<(Arc<TranscriptService>, Arc<RwLock<Vec<Value>>>)>>,
     stats: Mutex<StatsService>,
 }
 
@@ -138,23 +142,38 @@ pub fn router(host: TranscriptHost) -> Router {
 impl Inner {
     fn transcript(&self) -> Arc<TranscriptService> {
         let catalog = (self.host.model_catalog)();
-        let key = serde_json::to_string(&catalog).unwrap_or_default();
         let mut slot = self
             .service
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        if let Some((cached, service)) = slot.as_ref() {
-            if *cached == key {
-                return service.clone();
+        if let Some((service, current)) = slot.as_ref() {
+            let mut current = current.write().unwrap_or_else(|error| error.into_inner());
+            if *current != catalog {
+                *current = catalog;
+                // Search items are parsed with the catalog; list metadata is not.
+                service.clear_search_cache();
             }
+            return service.clone();
         }
-        let service = Arc::new(TranscriptService::new(Inputs {
+        let current = Arc::new(RwLock::new(catalog.clone()));
+        let source = current.clone();
+        let mut service = TranscriptService::new(Inputs {
             state_dir: self.host.state_dir.clone(),
             claude_home: self.host.claude_home.clone(),
             codex_home: self.host.codex_home.clone(),
             model_catalog: catalog,
+        })
+        .with_catalog_source(Arc::new(move || {
+            source
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone()
         }));
-        *slot = Some((key, service.clone()));
+        if let Some(dir) = &self.host.cache_dir {
+            service = service.with_persist(dir.join("transcript-meta.json"));
+        }
+        let service = Arc::new(service);
+        *slot = Some((service.clone(), current));
         service
     }
 }
@@ -981,6 +1000,7 @@ mod tests {
         fn host(&self, registry: StubRegistry) -> TranscriptHost {
             TranscriptHost {
                 state_dir: self.path(&["state"]),
+                cache_dir: Some(self.path(&["cache"])),
                 claude_home: self.path(&["home"]),
                 codex_home: self.path(&["codex"]),
                 usage_state: self.path(&["usage"]),
@@ -1040,12 +1060,20 @@ mod tests {
 
     fn old_file(path: &std::path::Path, age_secs: u64) {
         let when = SystemTime::now() - Duration::from_secs(age_secs);
+        set_modified(path, when);
+    }
+
+    fn set_modified(path: &std::path::Path, when: SystemTime) {
         fs::File::options()
             .write(true)
             .open(path)
             .unwrap()
             .set_times(fs::FileTimes::new().set_modified(when))
             .unwrap();
+    }
+
+    fn mtime(path: &std::path::Path) -> SystemTime {
+        fs::metadata(path).unwrap().modified().unwrap()
     }
 
     async fn send_root_get(state: &Arc<super::Inner>) -> (u16, String) {
@@ -1456,6 +1484,76 @@ mod tests {
                     .is_some_and(|message| !message.is_empty())
             );
         });
+    }
+
+    // VERIFY: transcripts-http-cache-roundtrip
+    /// The HTTP list shares the bridge's on-disk metadata cache
+    /// (`transcript_bridge.rs:110-112`): a list persists
+    /// `cache_dir/transcript-meta.json`, a fresh service loads it, and an entry
+    /// whose mtime or size changed is re-read instead of served stale.
+    #[test]
+    fn list_metadata_cache_round_trips_and_invalidates_on_mtime_and_size() {
+        let fixture = Fixture::new();
+        fixture.transcript(
+            "p",
+            "one",
+            "{\"type\":\"user\",\"message\":{\"content\":\"first\"}}\n",
+        );
+        let query = format!("root={}", encode(&fixture.root()));
+        let source = fixture.path(&["root", "p", "one.jsonl"]);
+        let cache_file = fixture.path(&["cache", "transcript-meta.json"]);
+        let list = || {
+            run(async {
+                let state = inner(fixture.host(StubRegistry::default()));
+                send_list(&state, Some(&query)).await
+            })
+        };
+
+        let first = list();
+        assert_eq!(first.0, 200);
+        assert!(first.1.contains(r#""blurb":"first""#), "{}", first.1);
+
+        // The same `cache_dir/transcript-meta.json` file the stdio bridge writes.
+        let persisted: Value = serde_json::from_slice(&fs::read(&cache_file).unwrap()).unwrap();
+        assert_eq!(persisted["v"], json!(1));
+        let entries = persisted["meta"].as_array().unwrap();
+        assert_eq!(entries.len(), 1, "{persisted}");
+        assert_eq!(entries[0][0], json!(source.to_string_lossy().as_ref()));
+
+        // A fresh service (new daemon) loads the cache and answers identically.
+        assert_eq!(list(), first);
+
+        // mtime invalidates the entry even when the size is unchanged.
+        let before = mtime(&source);
+        fixture.transcript(
+            "p",
+            "one",
+            "{\"type\":\"user\",\"message\":{\"content\":\"other\"}}\n",
+        );
+        set_modified(&source, before + Duration::from_secs(2));
+        let third = list();
+        assert_eq!(third.0, 200);
+        assert!(third.1.contains(r#""blurb":"other""#), "{}", third.1);
+
+        // size invalidates the entry even when the mtime is unchanged.
+        let before = mtime(&source);
+        fixture.transcript(
+            "p",
+            "one",
+            "{\"type\":\"user\",\"message\":{\"content\":\"a longer blurb\"}}\n",
+        );
+        set_modified(&source, before);
+        let fourth = list();
+        assert_eq!(fourth.0, 200);
+        assert!(
+            fourth.1.contains(r#""blurb":"a longer blurb""#),
+            "{}",
+            fourth.1
+        );
+
+        // The refreshed entry is saved back for the next daemon start.
+        let persisted: Value = serde_json::from_slice(&fs::read(&cache_file).unwrap()).unwrap();
+        assert_eq!(persisted["meta"][0][1]["blurb"], json!("a longer blurb"));
     }
 
     // VERIFY: wave8-numeric_cwd-8

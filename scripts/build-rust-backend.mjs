@@ -6,14 +6,17 @@ import { spawnSync } from 'node:child_process';
 const root = resolve(import.meta.dirname, '..');
 const localCargo = join(homedir(), '.cargo', 'bin', process.platform === 'win32' ? 'cargo.exe' : 'cargo');
 const cargo = process.platform === 'win32' && existsSync(localCargo) ? localCargo : 'cargo';
-const result = spawnSync(cargo, ['build', '--release', '--manifest-path', 'rust/backend/Cargo.toml'], {
+const http = process.argv.includes('--http');
+const args = [http ? 'run' : 'build', '--release', '--manifest-path', 'rust/backend/Cargo.toml'];
+if (http) args.push('--', '--http');
+const result = spawnSync(cargo, args, {
   cwd: root,
   stdio: 'inherit',
   windowsHide: true,
 });
 
 if (result.error?.code === 'ENOENT') {
-  console.error('Rust is required to run the migrated wiki graph backend. Install rustup with the stable MSVC toolchain and ensure cargo is available, then run: cargo build --release --manifest-path rust/backend/Cargo.toml');
+  console.error('Singularity requires Cargo and stable Rust. On Windows, install the MSVC toolchain and Visual Studio C++ Build Tools.');
   process.exit(1);
 }
 if (result.error) throw result.error;
