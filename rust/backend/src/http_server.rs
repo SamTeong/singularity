@@ -220,6 +220,8 @@ impl CutoverServices {
             .merge(crate::http_transcripts::router(
                 crate::http_transcripts::TranscriptHost {
                     state_dir: state_dir.clone(),
+                    // Same on-disk list-metadata cache as the stdio bridge.
+                    cache_dir: Some(paths.cache_dir.clone()),
                     // VERIFY: wave31-transcript-home-3 — `~` expands from the user home.
                     claude_home: agents_home.clone(),
                     codex_home,

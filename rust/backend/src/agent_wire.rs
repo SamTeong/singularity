@@ -16,8 +16,20 @@
 //! Legacy load: pre-rename records stored the display field as `name`
 //! (`:110-119`); [`AgentRecord::normalize_legacy`] folds it into `title` and
 //! `name` is never written back.
+//!
+//! Legacy statuses are accepted because startup detaches all stored sessions.
+//! An unreadable row leaves its siblings available and prevents a later rewrite.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+// VERIFY: agent-wire-lenient-load
+fn stored_status<'de, D>(deserializer: D) -> Result<Status, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(serde_json::from_value(Value::deserialize(deserializer)?).unwrap_or_default())
+}
 
 // VERIFY: agent-wire-status
 /// The five registry states (`agents.mjs:443`, `:204-209`, `:118`). Serialized
@@ -80,6 +92,9 @@ pub struct AgentRecord {
     pub run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_ms: Option<i64>,
+    /// An unknown or legacy stored status loads as `detached` (`Status::default`),
+    /// the value Node's `init` writes over every loaded record (`:161`).
+    #[serde(default, deserialize_with = "stored_status")]
     pub status: Status,
     /// Legacy display field (`agents.mjs:117`): accepted on load, mapped into
     /// `title` by [`AgentRecord::normalize_legacy`], never serialized.
@@ -99,8 +114,8 @@ impl AgentRecord {
 
 // VERIFY: agent-wire-file
 /// The `agents.json` document (`agents.mjs:88-96`): `{ agents, recentRepos }`.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentsFile {
     pub agents: Vec<AgentRecord>,
     pub recent_repos: Vec<String>,
@@ -113,10 +128,32 @@ impl AgentsFile {
         serde_json::to_string_pretty(self).expect("an AgentsFile always serializes")
     }
 
-    /// `JSON.parse(readFileSync(STATE_FILE, 'utf8'))` (`:111`); a missing
-    /// `agents`/`recentRepos` key falls back to `[]` (`:112-113`).
-    pub fn parse(text: &str) -> Result<Self, serde_json::Error> {
-        serde_json::from_str(text)
+    /// Return the readable rows and flag a partial load so it cannot be persisted.
+    pub fn parse(text: &str) -> Result<(Self, bool), serde_json::Error> {
+        let mut raw: serde_json::Map<String, Value> = serde_json::from_str(text)?;
+        let rows: Option<Vec<Value>> =
+            serde_json::from_value(raw.remove("agents").unwrap_or(Value::Null))?;
+        let recent_repos: Option<Vec<String>> =
+            serde_json::from_value(raw.remove("recentRepos").unwrap_or(Value::Null))?;
+        let mut agents = Vec::new();
+        let mut partial = false;
+        for row in rows.unwrap_or_default() {
+            if !row.is_object() {
+                partial = true;
+                continue;
+            }
+            match serde_json::from_value::<AgentRecord>(row) {
+                Ok(record) if !record.id.trim().is_empty() => agents.push(record),
+                _ => partial = true,
+            }
+        }
+        Ok((
+            Self {
+                agents,
+                recent_repos: recent_repos.unwrap_or_default(),
+            },
+            partial,
+        ))
     }
 }
 
@@ -222,6 +259,41 @@ mod tests {
     }
 
     #[test]
+    fn legacy_status_and_bad_optional_types_keep_sibling_rows() {
+        // Shapes Node's `init` loads: an unknown status, a wrong-typed optional
+        // field and an unreadable entry must not fail the whole document.
+        let text = serde_json::to_string(&json!({
+            "agents": [
+                { "id": "old", "title": "legacy", "status": "suspended" },
+                { "id": "bad", "status": "detached", "createdAt": "yesterday", "scopes": 7 },
+                { "id": "ok", "status": "running", "createdAt": 7, "cwd": "C:\\repo" },
+                "not-an-object",
+                { "title": "missing id" },
+                { "id": "", "title": "empty id" },
+            ],
+            "recentRepos": ["C:\\repo"],
+        }))
+        .unwrap();
+
+        let (file, partial) = AgentsFile::parse(&text).unwrap();
+        assert!(partial);
+        assert_eq!(
+            file.agents
+                .iter()
+                .map(|record| record.id.as_str())
+                .collect::<Vec<_>>(),
+            ["old", "ok"]
+        );
+        // Unknown stored status → `detached`, Node's loaded value.
+        assert_eq!(file.agents[0].status, Status::Detached);
+        assert_eq!(file.agents[0].title.as_deref(), Some("legacy"));
+        // Valid siblings keep their stored values.
+        assert_eq!(file.agents[1].created_at, Some(7));
+        assert_eq!(file.agents[1].cwd.as_deref(), Some("C:\\repo"));
+        assert_eq!(file.recent_repos, vec!["C:\\repo"]);
+    }
+
+    #[test]
     fn agents_file_writes_the_node_document_shape() {
         let file = AgentsFile {
             agents: vec![AgentRecord {
@@ -236,10 +308,11 @@ mod tests {
         assert!(text.starts_with("{\n  \"agents\": [\n"));
         assert!(text.contains("\"recentRepos\""));
         assert!(!text.ends_with('\n'));
-        assert_eq!(AgentsFile::parse(&text).unwrap(), file);
+        assert_eq!(AgentsFile::parse(&text).unwrap(), (file, false));
 
         // Missing keys fall back to empty, like `data.agents || []`.
-        let empty = AgentsFile::parse("{}").unwrap();
+        let (empty, partial) = AgentsFile::parse("{}").unwrap();
+        assert!(!partial);
         assert!(empty.agents.is_empty());
         assert!(empty.recent_repos.is_empty());
     }

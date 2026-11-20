@@ -275,6 +275,7 @@ struct State {
     /// Insertion-ordered, like the JS `Map`.
     agents: Vec<Agent>,
     recent_repos: Vec<String>,
+    load_blocked: bool,
     /// Per-id generation counter; strictly increasing, never reset
     /// (`rust-pty-backend.mjs:143`).
     generations: HashMap<String, u64>,
@@ -459,12 +460,20 @@ impl Registry {
     /// after a restart). A malformed file is reported so the host can log it,
     /// exactly like Node's `init` warning; the registry stays empty.
     pub fn load(&self) -> Result<(), String> {
-        let text = match fs::read_to_string(&self.config.state_file) {
-            Ok(text) => text,
-            Err(_) => return Ok(()),
-        };
-        let mut file = AgentsFile::parse(&text).map_err(|error| error.to_string())?;
         let mut state = self.state.lock().unwrap();
+        let loaded = match fs::read_to_string(&self.config.state_file) {
+            Ok(text) => AgentsFile::parse(&text).map_err(|error| error.to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => Err(error.to_string()),
+        };
+        let (mut file, partial) = match loaded {
+            Ok(loaded) => loaded,
+            Err(error) => {
+                state.load_blocked = true;
+                return Err(error);
+            }
+        };
+        state.load_blocked = partial;
         state.agents.clear();
         state.recent_repos = std::mem::take(&mut file.recent_repos);
         for mut record in std::mem::take(&mut file.agents) {
@@ -494,6 +503,9 @@ impl Registry {
                 Some(existing) => *existing = agent,
                 None => state.agents.push(agent),
             }
+        }
+        if partial {
+            return Err("some records could not be loaded; writes are blocked".to_owned());
         }
         Ok(())
     }
@@ -1223,7 +1235,8 @@ impl Registry {
 
     // VERIFY: registry-kill
     /// `kill` (`agents.mjs:573-580`): a live agent's pty is killed and its
-    /// `onExit` does the removal; a dead/detached entry is dropped here.
+    /// `onExit` does the removal; a dead/detached entry is dropped here. An
+    /// explicit kill also cancels a queued theme respawn (`:686`).
     pub fn kill(&self, id: &str) -> Result<(), String> {
         let live = {
             let mut state = self.state.lock().unwrap();
@@ -1241,14 +1254,20 @@ impl Registry {
             let agent = state.find_mut(id).expect("the entry was checked above");
             if !agent.live {
                 false
-            } else if agent.pid.is_none() {
-                // Reserved, pty not spawned yet: a `port.kill` now addresses nothing
-                // and would be lost. Defer it onto the reservation; `launch_reserved`
-                // applies it the moment the pty exists.
-                // VERIFY: wave3-registry-f1-kill
-                defer_lifecycle(agent, PendingLifecycle::Drop);
-                return Ok(());
             } else {
+                // An explicit kill cancels a theme respawn queued by `respawn()`
+                // that has not fired yet (`agents.mjs:686`); `on_exit` would
+                // otherwise prefer the replacement.
+                // VERIFY: respawn-cancel-before-exit
+                agent.respawn_after_exit = None;
+                if agent.pid.is_none() {
+                    // Reserved, pty not spawned yet: a `port.kill` now addresses
+                    // nothing and would be lost. Defer it onto the reservation;
+                    // `launch_reserved` applies it the moment the pty exists.
+                    // VERIFY: wave3-registry-f1-kill
+                    defer_lifecycle(agent, PendingLifecycle::Drop);
+                    return Ok(());
+                }
                 true
             }
         };
@@ -1264,7 +1283,8 @@ impl Registry {
 
     // VERIFY: registry-remove
     /// `remove` (`agents.mjs:587-594`): unlike `kill`, a live agent is dropped
-    /// for good when its pty exits (`removeOnExit`).
+    /// for good when its pty exits (`removeOnExit`), and a queued theme respawn
+    /// is cancelled too (`:702`).
     pub fn remove(&self, id: &str) -> Result<(), String> {
         let live = {
             let mut state = self.state.lock().unwrap();
@@ -1282,6 +1302,10 @@ impl Registry {
                 false
             } else {
                 agent.remove_on_exit = true;
+                // Same explicit cancel as `kill()`: a queued respawn must not
+                // outlive `remove()` (`agents.mjs:702`).
+                // VERIFY: respawn-cancel-before-exit
+                agent.respawn_after_exit = None;
                 if agent.pid.is_none() {
                     // Same reservation window as `kill`: the drop is armed now and
                     // the kill follows the spawn.
@@ -1483,6 +1507,11 @@ impl Registry {
         let now = (self.config.clock)();
         let bytes = {
             let state = self.state.lock().unwrap();
+            if state.load_blocked {
+                return Err(
+                    "agents.json write failed: state was not fully readable at startup".to_owned(),
+                );
+            }
             AgentsFile {
                 agents: state
                     .agents
@@ -2122,7 +2151,9 @@ mod tests {
         }
 
         fn read_agents(&self) -> AgentsFile {
-            AgentsFile::parse(&fs::read_to_string(self.state_file()).unwrap()).unwrap()
+            AgentsFile::parse(&fs::read_to_string(self.state_file()).unwrap())
+                .unwrap()
+                .0
         }
     }
 
@@ -3390,6 +3421,48 @@ mod tests {
         assert_eq!(port.spawn_count(), 2);
     }
 
+    // An explicit kill cancels a theme respawn queued by respawn() that has not
+    // fired yet (`agents.mjs:686`): onExit would otherwise prefer the replacement.
+    // VERIFY: respawn-cancel-before-exit
+    #[test]
+    fn kill_cancels_a_queued_theme_respawn() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let id = "kill-cancels-respawn";
+        registry
+            .create(create_input(&fixture, id, "glm-5.2:cloud"))
+            .unwrap();
+
+        assert!(registry.respawn(id));
+        registry.kill(id).unwrap();
+        exit(&registry, id, 1, Some(0));
+
+        assert_eq!(port.spawn_count(), 1, "no replacement started");
+        assert!(registry.snapshot().is_empty());
+    }
+
+    // Same cancel on remove(): the queued respawn must not outlive it
+    // (`agents.mjs:702`).
+    // VERIFY: respawn-cancel-before-exit
+    #[test]
+    fn remove_cancels_a_queued_theme_respawn() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let id = "remove-cancels-respawn";
+        registry
+            .create(create_input(&fixture, id, "glm-5.2:cloud"))
+            .unwrap();
+
+        assert!(registry.respawn(id));
+        registry.remove(id).unwrap();
+        exit(&registry, id, 1, Some(0));
+
+        assert_eq!(port.spawn_count(), 1, "no replacement started");
+        assert!(registry.snapshot().is_empty());
+    }
+
     // agents.test.mjs:477-492.
     #[test]
     fn begin_drain_persists_live_sessions_as_detached_and_survives_their_exit() {
@@ -3954,6 +4027,18 @@ mod tests {
         assert!(!registry.is_live("legacy"));
         assert_eq!(registry.get_buf("legacy"), "");
         assert_eq!(registry.get_written("legacy"), 0);
+    }
+
+    #[test]
+    fn partial_load_keeps_readable_agents_and_refuses_to_overwrite_state() {
+        let fixture = Fixture::new();
+        fixture.write_agents(vec![json!({"id": "good"}), json!({"id": 7})]);
+        let before = fs::read(fixture.state_file()).unwrap();
+        let registry = fixture.registry(FakePort::new());
+        assert!(registry.load().is_err());
+        assert_eq!(registry.snapshot()[0].id, "good");
+        assert!(registry.persist().is_err());
+        assert_eq!(fs::read(fixture.state_file()).unwrap(), before);
     }
 
     #[test]

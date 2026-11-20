@@ -14,9 +14,8 @@
 //! (`http_server::enforce_transport_policy`); nothing here re-checks them.
 //!
 //! Known gaps against Node, all declared in the slice findings: static files are
-//! read whole into memory where `@fastify/static` streams them; `If-Match` /
-//! `If-Unmodified-Since` preconditions (412) and range requests are not
-//! implemented; `String.replace`'s `$&` / `` $` `` / `$'` pattern expansion in
+//! read whole into memory where `@fastify/static` streams them;
+//! `String.replace`'s `$&` / `` $` `` / `$'` pattern expansion in
 //! the injection is not reproduced, so a display home containing `$` differs;
 //! malformed percent-escapes stay literal instead of raising the router's
 //! `URIError`; and JSON replies rely on the outer Fastify-charset layer, like
@@ -188,24 +187,62 @@ fn respond_asset(asset: Asset, relative: &str, method: &Method, headers: &Header
         .unwrap_or(0);
     // `etag`'s stat tag, as `send` emits it.
     let etag = format!("W/\"{length:x}-{modified_ms:x}\"");
+    // `send`'s order: preconditions (412), then freshness (304), then ranges.
+    if precondition_failed(headers, &etag, &last_modified) {
+        return asset_error(
+            StatusCode::PRECONDITION_FAILED,
+            "Precondition Failed",
+            method,
+        );
+    }
     if fresh(headers, &etag, &last_modified) {
         return not_modified(&etag, &last_modified);
     }
+    let range = match header_str(headers, "range") {
+        Some(spec) if range_allowed(headers, &etag, &last_modified) => byte_range(spec, length),
+        _ => ByteRange::Ignore,
+    };
+    let (status, content, content_range) = match range {
+        ByteRange::Unsatisfiable => {
+            let mut response = asset_error(
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                "Range Not Satisfiable",
+                method,
+            );
+            insert(
+                response.headers_mut(),
+                header::CONTENT_RANGE,
+                &format!("bytes */{length}"),
+            );
+            return response;
+        }
+        ByteRange::Single(start, end) => (
+            StatusCode::PARTIAL_CONTENT,
+            asset.bytes[start..=end].to_vec(),
+            Some(format!("bytes {start}-{end}/{length}")),
+        ),
+        ByteRange::Ignore => (StatusCode::OK, asset.bytes, None),
+    };
+    let content_length = content.len();
     let body = if *method == Method::HEAD {
         Vec::new()
     } else {
-        asset.bytes
+        content
     };
     let mut response = Response::new(Body::from(body));
+    *response.status_mut() = status;
     let outgoing = response.headers_mut();
     if let Some(mime) = mime_type(relative) {
         outgoing.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     }
-    insert(outgoing, header::CONTENT_LENGTH, &length.to_string());
+    insert(outgoing, header::CONTENT_LENGTH, &content_length.to_string());
     insert(outgoing, header::CACHE_CONTROL, CACHE_CONTROL);
     insert(outgoing, header::ETAG, &etag);
     insert(outgoing, header::LAST_MODIFIED, &last_modified);
     insert(outgoing, header::ACCEPT_RANGES, "bytes");
+    if let Some(content_range) = content_range {
+        insert(outgoing, header::CONTENT_RANGE, &content_range);
+    }
     response
 }
 
@@ -261,6 +298,151 @@ fn etag_matches(candidate: &str, etag: &str) -> bool {
     candidate == etag
         || candidate == format!("W/{etag}")
         || etag.strip_prefix("W/").is_some_and(|tag| tag == candidate)
+}
+
+/// `send`'s `isPreconditionFailure`: `If-Match` then `If-Unmodified-Since`, both
+/// evaluated; either failing is a 412. A date that does not parse is ignored.
+fn precondition_failed(headers: &HeaderMap, etag: &str, last_modified: &str) -> bool {
+    if let Some(if_match) = header_str(headers, "if-match") {
+        if if_match != "*"
+            && !if_match
+                .split(',')
+                .any(|candidate| etag_matches(candidate.trim(), etag))
+        {
+            return true;
+        }
+    }
+    if let Some(value) = header_str(headers, "if-unmodified-since") {
+        let (Ok(since), Ok(modified)) = (
+            httpdate::parse_http_date(value),
+            httpdate::parse_http_date(last_modified),
+        ) else {
+            return false;
+        };
+        if modified > since {
+            return true;
+        }
+    }
+    false
+}
+
+/// `send`'s `isRangeFresh`: a matching `If-Range` validator keeps the range;
+/// a stale one falls back to the full response.
+fn range_allowed(headers: &HeaderMap, etag: &str, last_modified: &str) -> bool {
+    let Some(if_range) = header_str(headers, "if-range") else {
+        return true;
+    };
+    if if_range.contains('"') {
+        return if_range.contains(etag);
+    }
+    match (
+        httpdate::parse_http_date(if_range),
+        httpdate::parse_http_date(last_modified),
+    ) {
+        (Ok(if_range), Ok(last_modified)) => last_modified <= if_range,
+        _ => false,
+    }
+}
+
+enum ByteRange {
+    /// Not a `bytes=` range the reference parser acts on, or several ranges.
+    Ignore,
+    Single(usize, usize),
+    Unsatisfiable,
+}
+
+/// `range-parser` with `combine: true`, as `send` applies it to a `bytes=` header.
+fn byte_range(spec: &str, length: usize) -> ByteRange {
+    let Some(list) = spec.trim_start().strip_prefix("bytes=") else {
+        return ByteRange::Ignore;
+    };
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for part in list.split(',') {
+        let Some((first, last)) = part.split_once('-') else {
+            continue;
+        };
+        let (first, last) = (first.trim(), last.trim());
+        let range = if first.is_empty() {
+            match position(last) {
+                Some(suffix) if suffix > 0 && suffix <= length => {
+                    Some((length - suffix, length - 1))
+                }
+                _ => None,
+            }
+        } else {
+            match position(first) {
+                Some(start) if start < length => {
+                    let end = if last.is_empty() {
+                        length - 1
+                    } else {
+                        match position(last) {
+                            Some(end) => end.min(length - 1),
+                            None => continue,
+                        }
+                    };
+                    (start <= end).then_some((start, end))
+                }
+                _ => None,
+            }
+        };
+        if let Some(range) = range {
+            ranges.push(range);
+        }
+    }
+    if ranges.is_empty() {
+        return ByteRange::Unsatisfiable;
+    }
+    ranges.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
+    for (start, end) in ranges {
+        match merged.last_mut() {
+            Some(previous) if start <= previous.1.saturating_add(1) => {
+                previous.1 = previous.1.max(end);
+            }
+            _ => merged.push((start, end)),
+        }
+    }
+    match merged.as_slice() {
+        [(start, end)] => ByteRange::Single(*start, *end),
+        _ => ByteRange::Ignore,
+    }
+}
+
+/// `parseInt`-with-digits-only, as `range-parser`'s range regex admits.
+fn position(value: &str) -> Option<usize> {
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit())
+        .then(|| value.parse().ok())
+        .flatten()
+}
+
+fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    headers.get(name).and_then(|value| value.to_str().ok())
+}
+
+/// Fastify's JSON shape for a static-file error; a HEAD keeps the entity
+/// headers (including `Content-Length`) but sends no body.
+fn asset_error(status: StatusCode, message: &str, method: &Method) -> Response {
+    let bytes = json!({
+        "statusCode": status.as_u16(),
+        "error": message,
+        "message": message,
+    })
+    .to_string()
+    .into_bytes();
+    let length = bytes.len();
+    let body = if *method == Method::HEAD {
+        Vec::new()
+    } else {
+        bytes
+    };
+    let mut response = Response::new(Body::from(body));
+    *response.status_mut() = status;
+    let outgoing = response.headers_mut();
+    insert(outgoing, header::CONTENT_TYPE, "application/json");
+    insert(outgoing, header::CONTENT_LENGTH, &length.to_string());
+    response
 }
 
 async fn shell_response(shell: &Shell, method: &Method) -> Response {
@@ -426,7 +608,7 @@ fn mime_type(relative: &str) -> Option<&'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::{contained_path, fallback, inject, percent_decode, router};
+    use super::{ByteRange, byte_range, contained_path, fallback, inject, percent_decode, router};
     use crate::http_policy::HttpPolicy;
     use axum::Router;
     use axum::http::StatusCode;
@@ -928,5 +1110,266 @@ mod tests {
         ] {
             assert_eq!(contained_path(&dist, relative), None, "{relative:?}");
         }
+    }
+
+    #[test]
+    fn http_shell_byte_range_matches_range_parser() {
+        for (spec, expected) in [
+            ("bytes=0-3", ByteRange::Single(0, 3)),
+            ("  bytes=2-", ByteRange::Single(2, 9)),
+            ("bytes=-3", ByteRange::Single(7, 9)),
+            ("bytes=-10", ByteRange::Single(0, 9)),
+            ("bytes=0-99", ByteRange::Single(0, 9)),
+            ("bytes=0-4,5-9", ByteRange::Single(0, 9)),
+            ("bytes=0-6,4-9", ByteRange::Single(0, 9)),
+            ("bytes=0-1,3-4", ByteRange::Ignore),
+            ("items=0-1", ByteRange::Ignore),
+            ("BYTES=0-3", ByteRange::Ignore),
+            ("bytes = 0-3", ByteRange::Ignore),
+            ("bytes=10-", ByteRange::Unsatisfiable),
+            ("bytes=5-1", ByteRange::Unsatisfiable),
+            ("bytes=-11", ByteRange::Unsatisfiable),
+            ("bytes=-0", ByteRange::Unsatisfiable),
+            ("bytes=abc", ByteRange::Unsatisfiable),
+            ("bytes=", ByteRange::Unsatisfiable),
+        ] {
+            let outcome = byte_range(spec, 10);
+            match expected {
+                ByteRange::Single(expected_start, expected_end) => assert!(
+                    matches!(
+                        outcome,
+                        ByteRange::Single(start, end)
+                            if (start, end) == (expected_start, expected_end)
+                    ),
+                    "{spec}"
+                ),
+                ByteRange::Ignore => {
+                    assert!(matches!(outcome, ByteRange::Ignore), "{spec}")
+                }
+                ByteRange::Unsatisfiable => {
+                    assert!(matches!(outcome, ByteRange::Unsatisfiable), "{spec}")
+                }
+            }
+        }
+        assert!(matches!(byte_range("bytes=0-", 0), ByteRange::Unsatisfiable));
+        assert!(matches!(byte_range("bytes=-1", 0), ByteRange::Unsatisfiable));
+    }
+
+    #[test]
+    fn http_shell_asset_serves_byte_ranges_and_416() {
+        let fixture = Fixture::new("range");
+        run(async {
+            let (address, stop) = serve(&fixture, None).await;
+            let url = format!("http://{address}/assets/app.js");
+            let body = "console.log(1)\n";
+            for (range, status, slice, content_range) in [
+                ("bytes=0-3", 206, &body[..4], Some("bytes 0-3/15")),
+                ("bytes=2-", 206, &body[2..], Some("bytes 2-14/15")),
+                ("bytes=-2", 206, &body[13..], Some("bytes 13-14/15")),
+                ("bytes=0-999", 206, body, Some("bytes 0-14/15")),
+                ("bytes=0-1,3-4", 200, body, None),
+                ("items=0-1", 200, body, None),
+            ] {
+                let response = client()
+                    .get(&url)
+                    .header("range", range)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status().as_u16(), status, "{range}");
+                assert_eq!(
+                    header_value(&response, "content-range").as_deref(),
+                    content_range,
+                    "{range}"
+                );
+                let expected_length = slice.len().to_string();
+                assert_eq!(
+                    header_value(&response, "content-length").as_deref(),
+                    Some(expected_length.as_str()),
+                    "{range}"
+                );
+                assert_eq!(response.text().await.unwrap(), slice, "{range}");
+            }
+
+            for range in ["bytes=999-", "bytes=5-1", "bytes=-99", "bytes=-0", "bytes="] {
+                let response = client()
+                    .get(&url)
+                    .header("range", range)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::RANGE_NOT_SATISFIABLE, "{range}");
+                assert_eq!(
+                    header_value(&response, "content-range").as_deref(),
+                    Some("bytes */15"),
+                    "{range}"
+                );
+                assert_eq!(header_value(&response, "etag"), None, "{range}");
+                let body: serde_json::Value = response.json().await.unwrap();
+                assert_eq!(
+                    body,
+                    serde_json::json!({
+                        "statusCode": 416,
+                        "error": "Range Not Satisfiable",
+                        "message": "Range Not Satisfiable",
+                    }),
+                    "{range}"
+                );
+            }
+
+            let head = client()
+                .head(&url)
+                .header("range", "bytes=0-3")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(head.status(), StatusCode::PARTIAL_CONTENT);
+            assert_eq!(
+                header_value(&head, "content-range").as_deref(),
+                Some("bytes 0-3/15")
+            );
+            assert_eq!(header_value(&head, "content-length").as_deref(), Some("4"));
+            assert!(head.bytes().await.unwrap().is_empty());
+            stop.send(()).unwrap();
+        });
+    }
+
+    #[test]
+    fn http_shell_asset_preconditions_and_range_interactions_match_fastify() {
+        let fixture = Fixture::new("preconditions");
+        run(async {
+            let (address, stop) = serve(&fixture, None).await;
+            let url = format!("http://{address}/assets/app.js");
+            let body = "console.log(1)\n";
+            let first = client().get(&url).send().await.unwrap();
+            let etag = header_value(&first, "etag").unwrap();
+            let last_modified = header_value(&first, "last-modified").unwrap();
+            let strong_etag = etag.strip_prefix("W/").unwrap().to_owned();
+            first.bytes().await.unwrap();
+            let old = "Thu, 01 Jan 1970 00:00:00 GMT";
+
+            let mixed_etags = format!("\"other\", {etag}");
+            for if_match in [
+                etag.clone(),
+                strong_etag.clone(),
+                "*".to_owned(),
+                mixed_etags,
+            ] {
+                let response = client()
+                    .get(&url)
+                    .header("if-match", &if_match)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK, "{if_match}");
+                assert_eq!(response.text().await.unwrap(), body, "{if_match}");
+            }
+
+            for (label, headers) in [
+                ("if-match other", vec![("if-match", "\"other\"".to_owned())]),
+                ("if-match list", vec![("if-match", "\"a\", \"b\"".to_owned())]),
+                ("ius old", vec![("if-unmodified-since", old.to_owned())]),
+                (
+                    "if-match pass + ius old",
+                    vec![
+                        ("if-match", etag.clone()),
+                        ("if-unmodified-since", old.to_owned()),
+                    ],
+                ),
+                (
+                    "if-match fail + ius future",
+                    vec![
+                        ("if-match", "\"other\"".to_owned()),
+                        ("if-unmodified-since", last_modified.clone()),
+                    ],
+                ),
+            ] {
+                let mut request = client().get(&url);
+                for (name, value) in headers {
+                    request = request.header(name, value);
+                }
+                let response = request.send().await.unwrap();
+                assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED, "{label}");
+                assert_eq!(header_value(&response, "etag"), None, "{label}");
+                assert_eq!(header_value(&response, "accept-ranges"), None, "{label}");
+                let length = header_value(&response, "content-length").unwrap();
+                let payload: serde_json::Value = response.json().await.unwrap();
+                assert_eq!(
+                    payload,
+                    serde_json::json!({
+                        "statusCode": 412,
+                        "error": "Precondition Failed",
+                        "message": "Precondition Failed",
+                    }),
+                    "{label}"
+                );
+                assert_eq!(length, "80", "{label}");
+            }
+
+            for value in [last_modified.as_str(), "not a date"] {
+                let response = client()
+                    .get(&url)
+                    .header("if-unmodified-since", value)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK, "{value}");
+                response.bytes().await.unwrap();
+            }
+
+            // `send` checks freshness before ranges, and `If-Range` can veto one.
+            let revalidated = client()
+                .get(&url)
+                .header("range", "bytes=0-3")
+                .header("if-none-match", &etag)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(revalidated.status(), StatusCode::NOT_MODIFIED);
+            assert_eq!(header_value(&revalidated, "content-range"), None);
+
+            let ranged = client()
+                .get(&url)
+                .header("range", "bytes=0-3")
+                .header("if-range", &etag)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(ranged.status(), StatusCode::PARTIAL_CONTENT);
+            assert_eq!(ranged.text().await.unwrap(), &body[..4]);
+
+            for if_range in ["\"stale\"", old] {
+                let response = client()
+                    .get(&url)
+                    .header("range", "bytes=0-3")
+                    .header("if-range", if_range)
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), StatusCode::OK, "{if_range}");
+                assert_eq!(header_value(&response, "content-range"), None, "{if_range}");
+                assert_eq!(response.text().await.unwrap(), body, "{if_range}");
+            }
+
+            let dated = client()
+                .get(&url)
+                .header("range", "bytes=0-3")
+                .header("if-range", &last_modified)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(dated.status(), StatusCode::PARTIAL_CONTENT);
+
+            let head = client()
+                .head(&url)
+                .header("if-match", "\"other\"")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(head.status(), StatusCode::PRECONDITION_FAILED);
+            assert_eq!(header_value(&head, "content-length").as_deref(), Some("80"));
+            assert!(head.bytes().await.unwrap().is_empty());
+            stop.send(()).unwrap();
+        });
     }
 }

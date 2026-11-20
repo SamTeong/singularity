@@ -1,8 +1,7 @@
 # Backend runtime and Rust migration
 
-The default runtime combines a Node HTTP host with Rust services. A native Rust
-HTTP host is also available explicitly; the default launch commands have not
-switched to it.
+The default daemon serves HTTP and WebSockets through Rust/Axum. Fastify is
+available through the explicit Node startup commands.
 
 ## Requirements and startup
 
@@ -13,19 +12,19 @@ settings; see [`.env.example`](../.env.example) for the available settings.
 
 | Command | Runtime |
 | --- | --- |
-| `pnpm start` | Builds `web/dist` and Rust, then starts the Node/Fastify daemon |
-| `pnpm dev` | Builds Rust and starts the Node daemon plus the Vite dev server |
-| `pnpm server` | Builds Rust and starts Node; does not build the web UI |
-| `pnpm start:rust` | Builds `web/dist` and Rust, then runs `singularity-backend --http` directly |
+| `pnpm start` | Builds `web/dist` and Rust, then starts Axum |
+| `pnpm dev` | Builds Rust, starts Axum, then starts Vite with HTTP and WebSocket proxies |
+| `pnpm server` | Builds Rust and starts Axum using the existing `web/dist` |
+| `pnpm start:rust` | Alias for `pnpm start` |
+| `pnpm start:node` | Builds `web/dist` and Rust, then starts Fastify |
+| `pnpm server:node` | Builds Rust and starts Fastify using the existing `web/dist` |
 | `node scripts/build-rust-backend.mjs` | Builds the release Rust binary without starting a daemon |
 
-The default Node daemon requires `SINGULARITY_HOME`, `DAEMON_PORT` and an
-absolute `CLAUDE_BIN`. Native HTTP requires `SINGULARITY_HOME` and
-`DAEMON_PORT`; provider binaries are optional at startup, but the corresponding
-agent cannot spawn without its configured executable. Both modes load `.env`,
-bind only to loopback and support optional `SING_TOKEN`. `VITE_PORT` controls the
-dev-server integration. Use absolute paths in `.env`; Node's env-file loader
-does not expand shell variables or `~`.
+Both hosts require `SINGULARITY_HOME`, `DAEMON_PORT` and an absolute
+`CLAUDE_BIN`. Run the package commands from the checkout so the daemon can
+read `.env` and serve `web/dist`. Both bind to loopback and support optional
+`SING_TOKEN`. Set `VITE_PORT` to configure the dev-server port. Use absolute
+paths in `.env`.
 
 `SINGULARITY_HOME/state` holds durable state, and `cache` holds disposable data.
 Tickets, reports and task worktrees live under the trusted root, which defaults
@@ -34,7 +33,7 @@ are runtime data and must not be swept as arbitrary temporary files.
 
 ## Ownership and process boundaries
 
-In the default mode, `server/index.mjs` hosts Fastify, WebSockets, routes,
+In Fastify mode, `server/index.mjs` hosts Fastify, WebSockets, routes,
 security/static-shell delivery and application orchestration. It starts two
 Rust subprocesses before listening:
 
@@ -51,14 +50,12 @@ Use the existing Rust owner when changing migrated behavior rather than adding
 a second implementation in an adapter.
 
 Native `--http` mode runs Axum directly, with its own routes, WebSockets,
-shell delivery, lifecycle, PTYs and state services. It does not put the Node
-gateway in front of Rust. Runtime entrypoints establish this boundary; they do
-not establish complete feature parity between the two HTTP hosts.
+shell delivery, lifecycle, PTYs and state services.
 
-The executable is `rust/backend/target/release/singularity-backend` (`.exe` on
-Windows). The request bridge supports `SINGULARITY_RUST_BACKEND_BINARY` for an
-explicit binary override. Native test tools use `SINGULARITY_NATIVE_BIN`;
-these settings apply to different launch paths.
+The default executable is `rust/backend/target/release/singularity-backend`
+(`.exe` on Windows). Cargo honors `CARGO_TARGET_DIR` for native startup.
+The Fastify request bridge supports `SINGULARITY_RUST_BACKEND_BINARY`.
+Native test tools use `SINGULARITY_NATIVE_BIN`.
 
 Rust PTYs replace the default registry's earlier `node-pty` path. Windows
 ConPTY DLL selection, termination and startup cursor handling have explicit

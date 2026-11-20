@@ -5,6 +5,11 @@
 //!
 //! - `nextFire` is derived at load and after every fire from *now* and is never
 //!   persisted; missed occurrences are structurally ignored (`crons.mjs:6-9`).
+//! - Load is record-tolerant like the reference (`:52-57`) and
+//!   [`crate::task_service::TaskService::load`]: a record this build cannot hold
+//!   keeps its valid siblings. Pre-rename records (`name`/`prompt`, `1fa8003`)
+//!   are normalised to `title`/`description`. Unreadable records are carried
+//!   through writes without being scheduled.
 //! - Every mutation is staged first: build the new job vector, serialise
 //!   `{"crons":[…]}` with 2-space pretty JSON, write atomically, and only on a
 //!   successful write swap it into memory. A failed write leaves memory
@@ -102,14 +107,6 @@ pub struct CronJob {
     pub pending_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_run_at: Option<i64>,
-}
-
-// VERIFY: crons-state-file
-/// `{"crons":[…]}` (`crons.mjs:28`).
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-struct CronsFile {
-    crons: Vec<CronJob>,
 }
 
 #[derive(Default)]
@@ -336,6 +333,8 @@ pub struct CronsService {
     stopped: AtomicBool,
     /// The bus subscription id for the status listener, so it can be removed.
     subscription: Mutex<Option<u64>>,
+    /// Records to retain in the file, or an error if the document itself is unreadable.
+    unreadable_jobs: Mutex<Result<Vec<Value>, String>>,
 }
 
 impl CronsService {
@@ -358,6 +357,7 @@ impl CronsService {
             tick: Mutex::new(None),
             stopped: AtomicBool::new(false),
             subscription: Mutex::new(None),
+            unreadable_jobs: Mutex::new(Ok(Vec::new())),
         }
     }
 
@@ -387,14 +387,46 @@ impl CronsService {
         }
     }
 
+    // VERIFY: crons-load-tolerant
+    /// Retain unrecognized rows so a valid sibling can still run or be updated.
     fn load(&self) {
+        let mut unreadable = self.unreadable_jobs.lock().unwrap();
+        let records = match self.read_records() {
+            Ok(records) => records,
+            Err(error) => {
+                eprintln!("crons.json load failed: {error}");
+                *unreadable = Err(error);
+                return;
+            }
+        };
+        let mut jobs = Vec::new();
+        let mut retained = Vec::new();
+        for (index, record) in records.into_iter().enumerate() {
+            match parse_cron_job(&record) {
+                Ok(job) => jobs.push(job),
+                Err(error) => {
+                    eprintln!("crons.json row {} retained without scheduling: {error}", index + 1);
+                    retained.push(record);
+                }
+            }
+        }
+        *unreadable = Ok(retained);
+        drop(unreadable);
+        self.state.lock().unwrap().jobs = jobs;
+    }
+
+    fn read_records(&self) -> Result<Vec<Value>, String> {
         let text = match std::fs::read_to_string(&self.config.state_file) {
             Ok(text) => text,
-            Err(_) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.to_string()),
         };
-        match serde_json::from_str::<CronsFile>(&text) {
-            Ok(file) => self.state.lock().unwrap().jobs = file.crons,
-            Err(error) => eprintln!("crons.json load failed: {error}"),
+        let mut document: serde_json::Map<String, Value> =
+            serde_json::from_str(&text).map_err(|error| error.to_string())?;
+        match document.remove("crons") {
+            None | Some(Value::Null) => Ok(Vec::new()),
+            Some(Value::Array(rows)) => Ok(rows),
+            _ => Err("crons is not an array".to_owned()),
         }
     }
 
@@ -1113,12 +1145,24 @@ impl CronsService {
     }
 
     // VERIFY: crons-persist-before-mutate
+    // VERIFY: crons-load-blocked-persist
     fn persist(&self, jobs: &[CronJob]) -> Result<(), CronError> {
-        self.persist_calls.fetch_add(1, Ordering::Relaxed);
-        let document = CronsFile {
-            crons: jobs.to_vec(),
+        let text = {
+            let unreadable = self.unreadable_jobs.lock().unwrap();
+            let retained = unreadable.as_ref().map_err(|reason| {
+                CronError::Persist(format!(
+                    "crons.json not readable at startup ({reason}); refusing to overwrite it"
+                ))
+            })?;
+            let records: Vec<Value> = jobs
+                .iter()
+                .map(|job| serde_json::to_value(job).expect("a CronJob always serializes"))
+                .chain(retained.iter().cloned())
+                .collect();
+            serde_json::to_string_pretty(&json!({ "crons": records }))
+                .expect("cron records always serialize")
         };
-        let text = serde_json::to_string_pretty(&document).expect("a CronsFile always serialises");
+        self.persist_calls.fetch_add(1, Ordering::Relaxed);
         write_atomic(&self.config.state_file, text.as_bytes()).map_err(|error| {
             eprintln!("crons.json write failed: {error}");
             CronError::Persist(format!("crons.json write failed: {error}"))
@@ -1128,6 +1172,33 @@ impl CronsService {
     fn emit(&self) {
         self.bus.emit(&BusEvent::Crons(self.snapshot_value()));
     }
+}
+
+// VERIFY: crons-load-tolerant
+/// Node keeps every record it can spread into the map (`crons.mjs:54`). Records
+/// written before the `name`/`prompt` → `title`/`description` rename
+/// (`1fa8003`) carry the old keys but the same values, so map those two and
+/// require the modern shape. Unrecognized rows stay on disk.
+fn parse_cron_job(record: &Value) -> Result<CronJob, String> {
+    let Value::Object(record) = record else {
+        return Err("expected an object".to_owned());
+    };
+    let mut record = record.clone();
+    for (legacy, modern) in [("name", "title"), ("prompt", "description")] {
+        if record.get(modern).is_none_or(Value::is_null) {
+            if let Some(value) = record.remove(legacy) {
+                record.insert(modern.to_owned(), value);
+            }
+        }
+    }
+    let enabled = record.get("enabled").is_some_and(js_truthy);
+    record.insert("enabled".to_owned(), Value::Bool(enabled));
+    let job: CronJob =
+        serde_json::from_value(Value::Object(record)).map_err(|error| error.to_string())?;
+    if job.id.trim().is_empty() {
+        return Err("expected a non-empty id".to_owned());
+    }
+    Ok(job)
 }
 
 fn wire_value(job: &CronJob, next_fire: Option<i64>) -> Value {
@@ -1950,6 +2021,108 @@ mod tests {
         let (broken, _, _, _) = fixture.setup();
         broken.init(None);
         assert!(jobs(&broken.snapshot_value()).is_empty());
+        // VERIFY: crons-load-write-block
+        // An unreadable file is never replaced by the empty in-memory view.
+        assert!(matches!(
+            broken.create(&body(&fixture, "new"), None),
+            Err(CronError::Persist(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(fixture.state_file()).unwrap(),
+            "not json"
+        );
+    }
+
+    // VERIFY: crons-load-legacy
+    #[test]
+    fn load_normalises_pre_rename_name_and_prompt_records() {
+        let fixture = Fixture::new();
+        fs::write(
+            fixture.state_file(),
+            serde_json::to_string_pretty(&json!({"crons": [
+                {
+                    "id": "legacy", "name": "old title", "enabled": "yes",
+                    "cronExpr": "0 0 * * *", "prompt": "old description",
+                    "cwd": fixture.repo(), "lastSessionId": null, "lastFiredAt": null,
+                    "createdAt": 1, "updatedAt": 2
+                },
+                {
+                    "id": "modern", "title": "new title", "enabled": false,
+                    "cronExpr": "0 0 * * *", "description": "new description",
+                    "cwd": fixture.repo(), "lastSessionId": null, "lastFiredAt": null,
+                    "createdAt": 1, "updatedAt": 1
+                }
+            ]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let (service, _, _, _) = fixture.setup();
+        service.init(None);
+
+        let snapshot = service.snapshot_value();
+        assert_eq!(
+            jobs(&snapshot).len(),
+            2,
+            "a supported old record is not dropped"
+        );
+        assert_eq!(job(&snapshot, "legacy")["title"], json!("old title"));
+        assert_eq!(job(&snapshot, "legacy")["enabled"], json!(true));
+        assert_eq!(
+            job(&snapshot, "legacy")["description"],
+            json!("old description")
+        );
+        assert_eq!(job(&snapshot, "modern")["title"], json!("new title"));
+
+        // Normalised data is writable: the next persist stores the modern keys.
+        service
+            .update("legacy", &json!({ "title": "edited" }))
+            .unwrap();
+        let stored: Value =
+            serde_json::from_str(&fs::read_to_string(fixture.state_file()).unwrap()).unwrap();
+        assert_eq!(stored["crons"][0]["title"], "edited");
+        assert_eq!(stored["crons"][0]["description"], "old description");
+    }
+
+    #[test]
+    fn valid_crons_can_run_and_persist_alongside_an_unreadable_record() {
+        let fixture = Fixture::new();
+        let original = serde_json::to_string_pretty(&json!({"crons": [
+            {
+                "id": "a", "title": "a", "enabled": false, "cronExpr": "0 0 * * *",
+                "description": "p", "cwd": fixture.repo(),
+                "lastSessionId": null, "lastFiredAt": null,
+                "createdAt": 1, "updatedAt": 1
+            },
+            {
+                "id": "broken", "title": 7, "enabled": false, "cronExpr": "0 0 * * *",
+                "description": "p", "cwd": fixture.repo(),
+                "lastSessionId": null, "lastFiredAt": null,
+                "createdAt": 1, "updatedAt": 1
+            },
+            {
+                "id": "c", "title": "c", "enabled": false, "cronExpr": "0 0 * * *",
+                "description": "p", "cwd": fixture.repo(),
+                "lastSessionId": null, "lastFiredAt": null,
+                "createdAt": 1, "updatedAt": 1
+            }
+        ]}))
+        .unwrap();
+        fs::write(fixture.state_file(), &original).unwrap();
+        let (service, _, _, _) = fixture.setup();
+        service.init(None);
+
+        let snapshot = service.snapshot_value();
+        assert_eq!(jobs(&snapshot).len(), 2, "the valid siblings still load");
+        assert_eq!(job(&snapshot, "a")["title"], "a");
+        assert_eq!(job(&snapshot, "c")["title"], "c");
+
+        service.run("a").unwrap();
+        service.update("c", &json!({ "title": "edited" })).unwrap();
+        let before: Value = serde_json::from_str(&original).unwrap();
+        let after: Value =
+            serde_json::from_str(&fs::read_to_string(fixture.state_file()).unwrap()).unwrap();
+        assert!(after["crons"].as_array().unwrap().contains(&before["crons"][1]));
+        assert_eq!(job(&service.snapshot_value(), "c")["title"], "edited");
     }
 
     // VERIFY: crons-idle-kill-lifecycle
