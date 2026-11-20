@@ -21,7 +21,7 @@ import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, cre
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
 import { resolveRoot } from './wiki.mjs';
-import { createRustBackend, createWikiGraphHandler, createModelsHandlers } from './rust-backend.mjs';
+import { createRustBackend, createWikiGraphHandler, createModelsHandlers, rustBackendBinary } from './rust-backend.mjs';
 import { createRustPtyBackend } from './rust-pty-backend.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
@@ -132,7 +132,7 @@ setCodexIdentityBackend(rustBackend);
 // kernel32; it cannot pin node-pty's former package-relative DLL. This is an
 // accepted compatibility difference (portable-pty 0.9.0 win/psuedocon.rs).
 const rustPtyBackend = createRustPtyBackend({
-  executable: join(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend'),
+  executable: rustBackendBinary(), // same resolution as the request bridge; no SINGULARITY_RUST_BACKEND_BINARY here
   cwd: join(__dirname, '..'),
 });
 reg.setPtyBackend(rustPtyBackend);

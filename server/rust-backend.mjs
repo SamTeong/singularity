@@ -2,11 +2,16 @@ import { spawn } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const defaultBinary = process.env.SINGULARITY_RUST_BACKEND_BINARY
-  ?? resolve(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
+// Cargo builds with the repo root as cwd (scripts/build-rust-backend.mjs), so a
+// relative CARGO_TARGET_DIR is relative to that root here too.
+export function rustBackendBinary(env = process.env, root = resolve(__dirname, '..')) {
+  const targetDir = env.CARGO_TARGET_DIR ? resolve(root, env.CARGO_TARGET_DIR) : join(root, 'rust', 'backend', 'target');
+  return join(targetDir, 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
+}
+const defaultBinary = process.env.SINGULARITY_RUST_BACKEND_BINARY ?? rustBackendBinary();
 const childEnv = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'WINDIR']
   .filter((key) => process.env[key] !== undefined)
   .map((key) => [key, process.env[key]]));

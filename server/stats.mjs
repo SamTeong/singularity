@@ -47,11 +47,17 @@ const PRICES = [
   ['claude-3-5-haiku', { input: 0.8, output: 4 }],
 ].sort((a, b) => b[0].length - a[0].length); // longest prefix first
 
+// A digit-ending prefix must end at a non-digit boundary, so a longer numeric
+// segment (a different model id or a date suffix) never matches.
+function matchesPrefix(model, prefix) {
+  return model.startsWith(prefix) && !(/\d$/.test(prefix) && /\d/.test(model[prefix.length] || ''));
+}
+
 function priceFor(model, promptTokens) {
   if (!model) return null;
-  if (model.startsWith('claude-haiku-5-5') && promptTokens > 100000) return { input: 0.5, output: 2.5 };
+  if (matchesPrefix(model, 'claude-haiku-5-5') && promptTokens > 100000) return { input: 0.5, output: 2.5 };
   for (const [prefix, p] of PRICES) {
-    if (model.startsWith(prefix) && !(/\d$/.test(prefix) && /\d/.test(model[prefix.length] || ''))) return p;
+    if (matchesPrefix(model, prefix)) return p;
   }
   return null;
 }

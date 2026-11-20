@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { PassThrough } from 'node:stream';
 import { test, after } from 'node:test';
 import Fastify from 'fastify';
-import { createModelPricesHandler, createModelsHandlers, createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
+import { createModelPricesHandler, createModelsHandlers, createRustBackend, createWikiGraphHandler, rustBackendBinary } from './rust-backend.mjs';
 
 // One real backend for the stateless bridge tests (explicit per-call paths, no
 // stop mid-test); each real start costs ~0.4 s. Tests that stop, restart, or rely
@@ -128,6 +128,54 @@ test('Rust bridge rejects startup when a spawned child exits before ready', asyn
 
   await assert.rejects(backend.start(), /exited before ready \(7\)/);
   await backend.stop();
+});
+
+test('Rust backend binary resolution follows CARGO_TARGET_DIR from the repository root', () => {
+  const root = join(tmpdir(), 'singularity-cargo-root');
+  const exe = process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend';
+  assert.equal(rustBackendBinary({}, root), join(root, 'rust', 'backend', 'target', 'release', exe));
+  // Relative values resolve against Cargo's cwd, which the build helper pins to the repo root.
+  assert.equal(rustBackendBinary({ CARGO_TARGET_DIR: 'cargo-target' }, root), join(root, 'cargo-target', 'release', exe));
+  const absolute = join(root, 'absolute-target');
+  assert.equal(rustBackendBinary({ CARGO_TARGET_DIR: absolute }, join(root, 'other-root')), join(absolute, 'release', exe));
+});
+
+test('Rust bridge default binary honors CARGO_TARGET_DIR and the explicit override', async () => {
+  const target = await mkdtemp(join(tmpdir(), 'singularity-cargo-target-'));
+  const previousTarget = process.env.CARGO_TARGET_DIR;
+  const previousBinary = process.env.SINGULARITY_RUST_BACKEND_BINARY;
+  const exe = process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend';
+  const spawnDefault = async (cacheKey) => {
+    const { createRustBackend: createFresh } = await import(`./rust-backend.mjs?${cacheKey}`);
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+    let spawned;
+    const backend = createFresh({ spawnProcess: (bin) => {
+      spawned = bin;
+      queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+      return child;
+    } });
+    await backend.start();
+    await backend.stop();
+    return spawned;
+  };
+  process.env.CARGO_TARGET_DIR = target;
+  delete process.env.SINGULARITY_RUST_BACKEND_BINARY;
+  try {
+    assert.equal(await spawnDefault('cargo-target-dir'), join(target, 'release', exe));
+    process.env.SINGULARITY_RUST_BACKEND_BINARY = join(target, 'explicit-binary');
+    assert.equal(await spawnDefault('explicit-binary'), join(target, 'explicit-binary'));
+  } finally {
+    if (previousTarget === undefined) delete process.env.CARGO_TARGET_DIR;
+    else process.env.CARGO_TARGET_DIR = previousTarget;
+    if (previousBinary === undefined) delete process.env.SINGULARITY_RUST_BACKEND_BINARY;
+    else process.env.SINGULARITY_RUST_BACKEND_BINARY = previousBinary;
+    await rm(target, { recursive: true, force: true });
+  }
 });
 
 test('Codex usage bridge sends correlated handle requests without credential values', async () => {

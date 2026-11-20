@@ -550,6 +550,71 @@ for (const op of ['kill', 'remove']) {
   });
 }
 
+// VERIFY: respawn-cancel-during-lookup
+// respawn() suspends on the Codex identity lookup BEFORE it arms respawnAfterExit,
+// so a kill/remove in that window used to clear a still-null flag and the
+// continuation armed the replacement anyway — onExit then respawned the
+// "removed" session. The cancel is per attempt: a later respawn on the same id
+// must still arm.
+for (const op of ['kill', 'remove']) {
+  test(`${op} during a gated Codex identity lookup cancels that respawn attempt only`, async () => {
+    const id = op === 'kill' ? '43000000-eeee-ffff-0000-430000000001' : '43000000-eeee-ffff-0000-430000000002';
+    const backend = manualPtyBackend();
+    registry.setPtyBackend(backend);
+    try {
+      const creating = create({ cwd: scratch, title: 'gated-respawn', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: id });
+      await backend.waitForSpawn(1);
+      backend.release(0);
+      await creating;
+
+      // Gate the identity lookup respawn() awaits; the pty stays live until the
+      // explicit kill/remove below.
+      let beginLookup;
+      let finishLookup;
+      const lookupStarted = new Promise((resolve) => { beginLookup = resolve; });
+      const lookupResult = new Promise((resolve) => { finishLookup = resolve; });
+      codexIdentity.setCodexIdentityBackend({
+        codexThreadFind: async () => { beginLookup(); return lookupResult; },
+        codexThreadExists: async () => false,
+      });
+
+      const pending = respawn(id);
+      await lookupStarted;
+      assert.equal(isLive(id), true, 'the lookup is in flight while the original pty is still live');
+      if (op === 'kill') kill(id); else remove(id);
+      finishLookup('thread-found-too-late');
+      assert.equal(await pending, false, 'the canceled attempt does not arm a replacement');
+
+      backend.exit(0); // the explicitly killed pty exits after the cancel
+      await waitForRemoval(id);
+      assert.equal(backend.spawns.length, 1, 'the canceled respawn never reaches the backend');
+      assert.equal(snapshot().some((row) => row.id === id), false, 'the explicitly killed agent stays gone');
+
+      // The earlier cancel must not poison a later attempt on the same id.
+      const later = create({ cwd: scratch, title: 'later-respawn', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: id });
+      await backend.waitForSpawn(2);
+      backend.release(1);
+      await later;
+      assert.equal(await respawn(id), true, 'a later respawn attempt still arms');
+      backend.exit(1); // its pty exits → the armed replacement create runs
+      await backend.waitForSpawn(3);
+      backend.release(2);
+      const deadline = Date.now() + 5000;
+      while (!isLive(id) && Date.now() < deadline) await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(backend.spawns.length, 3, 'the later respawn publishes its replacement');
+      assert.equal(isLive(id), true);
+    } finally {
+      codexIdentity.setCodexIdentityBackend(modelBackend);
+      for (const handle of backend.handles) handle.exitFn?.(0);
+      for (let i = 0; i < backend.handles.length; i++) backend.release(i); // settle a buggy parked replacement
+      await new Promise((resolve) => setImmediate(resolve));
+      if (snapshot().some((row) => row.id === id)) { remove(id); for (const handle of backend.handles) handle.exitFn?.(0); }
+      await waitForRemoval(id);
+      registry.setPtyBackend(ptyBackend);
+    }
+  });
+}
+
 test('Codex transcript liveness resolves a distinct thread id and blocks duplicate owned resumes', async () => {
   const agentId = '90000000-aaaa-bbbb-cccc-900000000005';
   const threadId = 'dddddddd-eeee-ffff-0000-444444444444';
@@ -1041,6 +1106,68 @@ for (const kind of pendingKinds) {
     });
   }
 }
+
+// VERIFY: reattach-failure-exit-cleanup
+// reattach() bumps a.gen before its awaits, which disarms the concurrently
+// exited pty's pending onExit cleanup. A reattach that then fails must finish
+// that cleanup for the generation it claimed instead of leaving a dead 'exited'
+// row in the registry and agents.json forever.
+test('failed reattach of a concurrently exited agent removes the dead exited row', async () => {
+  const id = '44000000-ffff-0000-4444-440000000001';
+  const backend = manualPtyBackend();
+  registry.setPtyBackend(backend);
+  let releaseExitRoute;
+  let markExitRoute;
+  const exitRouteStarted = new Promise((resolve) => { markExitRoute = resolve; });
+  const exitRoute = new Promise((resolve) => { releaseExitRoute = resolve; });
+  let routeCalls = 0;
+  modelStore.setModelsBackend({ modelRoute: async () => {
+    routeCalls++;
+    if (routeCalls === 1) { markExitRoute(); return exitRoute; } // the exit cleanup parks here
+    return claudeRoute;
+  } });
+  try {
+    const creating = create({ cwd: scratch, title: 'failed-reattach', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    await backend.waitForSpawn(1);
+    backend.release(0);
+    await creating;
+
+    backend.exit(0); // pty dies; its cleanup's current() check is still pending
+    await exitRouteStarted;
+    // Reattach in that window; its own spawn fails, so nothing re-owns the row.
+    backend.spawn = async () => { throw new Error('spawn unavailable'); };
+    await assert.rejects(() => reattach(id), /spawn unavailable/);
+    assert.equal(snapshot().some((row) => row.id === id), false, 'the failed reattach removes the dead exited row');
+    const onDisk = JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'agents.json'), 'utf8')).agents;
+    assert.equal(onDisk.some((row) => row.id === id), false, 'the dead row is not persisted');
+
+    releaseExitRoute(claudeRoute); // the disarmed cleanup must not resurrect a row
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(snapshot().some((row) => row.id === id), false, 'the stale cleanup leaves the registry empty of the id');
+  } finally {
+    releaseExitRoute(claudeRoute); // unblock the parked cleanup even on a failed assertion
+    for (const handle of backend.handles) handle.exitFn?.(0);
+    if (snapshot().some((row) => row.id === id)) remove(id); // a buggy run leaves the dead row behind
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+    modelStore.setModelsBackend(modelBackend);
+  }
+});
+
+test('failed reattach of an ordinary detached row keeps it for retry', async () => {
+  const id = '44000000-ffff-0000-4444-440000000002';
+  seedDetached(id);
+  registry.setPtyBackend({ spawn: async () => { throw new Error('spawn unavailable'); } });
+  try {
+    await assert.rejects(() => reattach(id), /spawn unavailable/);
+    const row = snapshot().find((entry) => entry.id === id);
+    assert.ok(row, 'a detached row is retryable, not cleanup debris');
+    assert.equal(row.status, 'detached');
+  } finally {
+    registry.setPtyBackend(ptyBackend);
+    remove(id); // drop the seeded row
+  }
+});
 
 test('beginDrain: live session persists to agents.json and survives its pty exit', async () => {
   const id = '50000000-aaaa-bbbb-cccc-500000000005';

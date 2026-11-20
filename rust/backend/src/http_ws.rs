@@ -37,6 +37,10 @@
 //!   replies stay in receive order while the socket loop keeps fan-out frames,
 //!   the heartbeat and close handling moving; Node runs each `async` handler
 //!   concurrently and may interleave two registry calls.
+//! - A slow command worker pauses the reader (TCP backpressure) once one
+//!   command no longer fits in the channel, instead of
+//!   closing `1013`: Node's `async` handler has no queue bound at all, so a
+//!   benign burst must never kill the socket.
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -268,6 +272,9 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
     let mut shutdown = state.shutdown.clone();
     let mut alive = true;
     let mut open = true;
+    // A command read from the socket with no channel slot yet; reads stay paused
+    // while it is set.
+    let mut pending: Option<String> = None;
 
     while open {
         tokio::select! {
@@ -324,24 +331,28 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
                     Delivery::Sent | Delivery::Queued => {}
                 }
             }
-            message = socket.recv() => {
+            // VERIFY: wave23-ws_backpressure-1 — the worker is serial, so a slow
+            // command must slow the reader, never close the socket: hold one
+            // command here and stop reading until the channel has a slot. The
+            // outbound, heartbeat and shutdown branches stay live meanwhile.
+            permit = command_tx.reserve(), if pending.is_some() => {
+                match permit {
+                    Ok(permit) => permit.send(pending.take().expect("the guard holds a command")),
+                    // The command task is gone, so nothing can handle a message.
+                    Err(_) => open = false,
+                }
+            }
+            message = socket.recv(), if pending.is_none() => {
                 match message {
                     Some(Ok(Message::Text(text))) => {
-                        // Queued, never awaited: the command task drains it in
-                        // receive order while this loop keeps sending frames.
-                        if command_tx.try_send(text.to_string()).is_err() {
-                            let _ = close(socket, 1013, "command backlog exceeded").await;
-                            open = false;
-                        }
+                        // Never awaited: the command task drains it in receive
+                        // order while this loop keeps sending frames.
+                        pending = Some(text.to_string());
                     }
                     // `JSON.parse(raw.toString())` (`:115`): binary frames are
                     // decoded as text too.
                     Some(Ok(Message::Binary(bytes))) => {
-                        let raw = String::from_utf8_lossy(&bytes).into_owned();
-                        if command_tx.try_send(raw).is_err() {
-                            let _ = close(socket, 1013, "command backlog exceeded").await;
-                            open = false;
-                        }
+                        pending = Some(String::from_utf8_lossy(&bytes).into_owned());
                     }
                     Some(Ok(Message::Pong(_))) => alive = true,
                     Some(Ok(Message::Ping(payload))) => {
@@ -370,6 +381,13 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
                 }
             }
             _ = heartbeat.tick() => {
+                // VERIFY: wave23-ws_backpressure-2 — with reads paused a pong
+                // can sit unread in the socket, so this tick proves nothing
+                // about the peer; skip it instead of killing a live socket.
+                if pending.is_some() {
+                    alive = true;
+                    continue;
+                }
                 // `if (ws.isAlive === false) { ws.terminate(); ... }` (`:88-92`).
                 if !alive {
                     open = false;
@@ -1062,9 +1080,16 @@ mod tests {
     }
 
     async fn serve(deps: WsDeps) -> Server {
+        serve_with_heartbeat(deps, HEARTBEAT).await
+    }
+
+    /// [`serve`] with an explicit ping period, for heartbeat tests.
+    async fn serve_with_heartbeat(deps: WsDeps, heartbeat: Duration) -> Server {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let handle = tokio::spawn(async move { axum::serve(listener, router(deps)).await });
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, router_with_heartbeat(deps, heartbeat)).await
+        });
         Server { address, handle }
     }
 
@@ -1599,6 +1624,139 @@ mod tests {
                 client.json().await,
                 json!({ "t": "attached", "id": "blocked" })
             );
+        });
+    }
+
+    /// Connects a raw client on `server` and parks its command worker inside a
+    /// gated `create`, so any further command has a stalled worker behind it.
+    async fn stalled_client(fixture: &Fixture, server: &Server, gate: &SpawnGate) -> RawClient {
+        let mut client = RawClient::connect(server.address, "/ws").await;
+        let _ = snapshot(&mut client).await;
+        client
+            .send_text(
+                &json!({
+                    "t": "create",
+                    "cwd": fixture.repo(),
+                    "title": "demo",
+                    "model": "claude",
+                    "sessionId": "blocked",
+                })
+                .to_string(),
+            )
+            .await;
+        for _ in 0..200 {
+            if gate.entered() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(gate.entered(), "create never reached the fake spawn");
+        client
+    }
+
+    // VERIFY: wave23-ws_backpressure-1 — a benign burst of application commands
+    // behind a slow worker must not close the socket 1013. The reader pauses
+    // instead (the old fixed 32-slot `try_send` closed on the 33rd queued
+    // command), outbound frames keep flowing, and every command is still
+    // handled in receive order once the worker drains.
+    #[test]
+    fn a_command_burst_behind_a_slow_worker_backpressures_instead_of_closing() {
+        run(async {
+            let fixture = Fixture::new();
+            let port = FakePort::new();
+            let gate = port.gate_spawn();
+            let registry = fixture.registry(port);
+            let server = serve(deps(
+                &fixture,
+                registry.clone(),
+                Arc::new(AtomicUsize::new(0)),
+                None,
+            ))
+            .await;
+            let mut client = stalled_client(&fixture, &server, &gate).await;
+
+            // 40 exceeds the channel capacity plus the pending slot.
+            for index in 0..40 {
+                client
+                    .send_text(
+                        &json!({ "t": "txmeta", "id": format!("burst-{index}") }).to_string(),
+                    )
+                    .await;
+            }
+            // With the worker stalled nothing else can reach the wire, so a
+            // frame in this window can only be the overflow close.
+            let early = tokio::time::timeout(Duration::from_secs(1), client.frame()).await;
+            assert!(early.is_err(), "socket answered a benign burst: {early:?}");
+
+            // Backpressure must not starve fan-out: the reader is paused and
+            // the worker is still stalled, yet a bus event still goes out.
+            registry.bus().emit(&BusEvent::Status {
+                id: "ghost".to_owned(),
+                status: Status::Running,
+            });
+            assert_eq!(
+                client.json().await,
+                json!({ "t": "status", "id": "ghost", "status": "running" })
+            );
+
+            gate.release();
+            assert_eq!(client.json().await["t"], "list");
+            assert_eq!(
+                client.json().await,
+                json!({ "t": "attached", "id": "blocked" })
+            );
+            for index in 0..40 {
+                assert_eq!(
+                    client.json().await,
+                    json!({
+                        "t": "txmeta",
+                        "id": format!("burst-{index}"),
+                        "written": 0,
+                        "ringMax": RING_MAX,
+                    }),
+                    "reply {index} out of order"
+                );
+            }
+        });
+    }
+
+    // VERIFY: wave23-ws_backpressure-2 — while the reader is paused a pong can
+    // be unread, so a heartbeat tick must not be taken as a miss: the socket
+    // survives several periods of backpressure and still answers afterwards.
+    #[test]
+    fn a_paused_reader_does_not_trip_the_heartbeat() {
+        run(async {
+            let fixture = Fixture::new();
+            let port = FakePort::new();
+            let gate = port.gate_spawn();
+            let registry = fixture.registry(port);
+            let server = serve_with_heartbeat(
+                deps(&fixture, registry, Arc::new(AtomicUsize::new(0)), None),
+                Duration::from_millis(200),
+            )
+            .await;
+            let mut client = stalled_client(&fixture, &server, &gate).await;
+
+            for index in 0..40 {
+                client
+                    .send_text(
+                        &json!({ "t": "txmeta", "id": format!("burst-{index}") }).to_string(),
+                    )
+                    .await;
+            }
+            // More than two periods with the reader paused; the un-fixed tick
+            // closed the socket on the second one, before the client could pong.
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            gate.release();
+
+            assert_eq!(client.json().await["t"], "list");
+            assert_eq!(
+                client.json().await,
+                json!({ "t": "attached", "id": "blocked" })
+            );
+            for index in 0..40 {
+                assert_eq!(client.json().await["id"], json!(format!("burst-{index}")));
+            }
         });
     }
 }

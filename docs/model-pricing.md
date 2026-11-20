@@ -34,6 +34,14 @@ the selected tier prices the entire request. The legacy `above_200k` field name
 does not set either boundary. Version matching rejects partial numeric segments
 so a dated Fable 5 ID does not resolve to Fable 5.2.
 
+Reports use the synced tier data from the live `pricing.json`, including any
+`above_200k` entries. A table without one applies base rates and the report does
+not fall back to embedded prices, because custom tables are supported. The
+embedded session estimators are independent: `server/stats.mjs` and
+`rust/backend/src/stats.rs` carry their own Haiku 5.5 above-100,000 tier, so the
+two surfaces intentionally diverge for Haiku 5.5 until
+`scripts/sync-model-prices.mjs --write` has populated `above_200k`.
+
 A fresh report process loads the updated live table. Running session estimators
 cache parsed costs and embedded rates until the daemon is restarted; syncing
 does not restart services. Usage-history requests read the live table afresh.
