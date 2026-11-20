@@ -9,7 +9,7 @@
 // Resume dialog. Resume is opened and only ever Cancelled.
 import { test, expect } from './fixtures/test.mjs';
 import { gotoView, visible } from '../e2e/helpers/nav.mjs';
-import { PROJECT_B, RICH_SESSION, SESSION_COUNT_A } from '../web/src/mock/fixtures.js';
+import { PROJECT_A, PROJECT_B, RICH_SESSION, ROOTS, SESSION_COUNT_A, sessionId } from '../web/src/mock/fixtures.js';
 
 const TOTAL_SESSIONS = SESSION_COUNT_A + 2; // 30 alpha + the rich session + "Fixture session 901"
 
@@ -96,6 +96,73 @@ test('list order, rich transcript render, URL write + cold reload, and Resume pr
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+// VERIFY: transcripts-root-switch-reset
+test('a root switch drops old-root rows and shows loading until the new root lands', async ({ page }) => {
+  // Hold every list request for a root other than the seeded corpus root.
+  await page.addInitScript((corpusRoot) => {
+    window.__releaseTranscriptList = null;
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/transcripts' && url.searchParams.get('root') !== corpusRoot) {
+        return new Promise((resolve) => {
+          window.__releaseTranscriptList = () => resolve(new Response(JSON.stringify({ sessions: [] }), { headers: { 'content-type': 'application/json' } }));
+        });
+      }
+      return originalFetch(input, init);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  }, ROOTS.projects);
+
+  await openTranscripts(page);
+  const oldRow = page.getByRole('button', { name: /Fixture session 0\b/ });
+  await expect(oldRow).toBeVisible();
+
+  await page.getByRole('button', { name: 'Browse' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('button', { name: PROJECT_A }).click();
+  // The picker's path only moves after /fs/browse lands; Select would otherwise
+  // re-pick the corpus root.
+  await expect(dialog.getByRole('textbox')).toHaveValue(`~/projects/${PROJECT_A}`);
+  await dialog.getByRole('button', { name: 'Select' }).click();
+
+  // New-root list still held: old rows must be gone, cold-scan loading visible.
+  await expect(oldRow).toHaveCount(0);
+  await expect(visible(page.getByText('Loading transcripts…', { exact: true })).first()).toBeVisible();
+  await expect(page.getByText('No transcripts.', { exact: true })).not.toBeVisible();
+
+  await page.waitForFunction(() => typeof window.__releaseTranscriptList === 'function');
+  await page.evaluate(() => window.__releaseTranscriptList());
+  await expect(visible(page.getByText('No transcripts.', { exact: true })).first()).toBeVisible();
+  await expect(oldRow).toHaveCount(0);
+});
+
+// Selecting the root already loaded is a no-op, not a root switch: the [root]
+// effect would not re-run, so clearing the corpus would strand the list on
+// "Loading transcripts…" until the next poll and drop the open transcript.
+// VERIFY: transcripts-root-same-noop
+test('re-selecting the current root keeps the loaded corpus and open transcript', async ({ page }) => {
+  await openTranscripts(page);
+  await page.getByRole('button', { name: /Retry backoff cap/ }).click();
+  await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Browse' }).click();
+  const dialog = page.getByRole('dialog');
+  // The picker opens at the persisted root, so Select re-picks that same path.
+  await expect(dialog.getByRole('textbox')).toHaveValue('~/projects');
+  await dialog.getByRole('button', { name: 'Select' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // The buggy pick clears the corpus and flags loading, yet the unchanged root
+  // never re-runs the list effect, so it sits on "Loading…" until the next 15s
+  // poll. Assert immediately (short timeout) that neither symptom appeared.
+  await expect(page.getByText('Loading transcripts…', { exact: true })).toHaveCount(0, { timeout: 2000 });
+  await expect(visible(page.getByText(`${TOTAL_SESSIONS} transcripts`, { exact: true })).first()).toBeVisible({ timeout: 2000 });
+  await expect(visible(page.getByText(`Retry backoff cap - ${RICH_SESSION}`, { exact: true })).first()).toBeVisible();
+  await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();
+});
+
 test('a pending first transcript list shows loading, not an empty list', async ({ page }) => {
   await page.addInitScript(() => {
     window.__releaseTranscriptList = null;
@@ -144,3 +211,81 @@ test('a successful empty poll clears the prior transcript list error', async ({ 
   await expect(visible(page.getByText('No transcripts.', { exact: true })).first()).toBeVisible();
   await expect(page.getByText('Failed to load transcripts.', { exact: true })).not.toBeVisible();
 });
+
+// VERIFY: transcript-request-ownership
+// A late /api/transcript response belongs to the request that issued it: two
+// opens in quick succession must not let the older request paint its transcript
+// (or clear the newer request's loading flag) under the selection now shown.
+// Holds the first request's response and releases it after the second selection.
+const LATE_CASES = [
+  { title: 'late success', mode: 'success', holdNext: false },
+  { title: 'late 404', mode: 'notfound', holdNext: false },
+  { title: 'late settle while the next transcript is still loading', mode: 'success', holdNext: true },
+];
+
+for (const c of LATE_CASES) {
+  test(`a stale transcript request cannot overwrite the current one (${c.title})`, async ({ page }) => {
+    const STALE_TX = sessionId(0);
+    await page.addInitScript(() => {
+      window.__holdTranscriptIds = [];
+      window.__releaseTranscript = {};
+      window.__transcriptSettled = {};
+      const wrap = (originalFetch) => (input, init) => {
+        const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+        const url = new URL(rawUrl, location.origin);
+        const id = url.pathname === '/api/transcript' ? url.searchParams.get('id') : null;
+        if (!id || !window.__holdTranscriptIds.includes(id)) return originalFetch(input, init);
+        // Fetch eagerly so the release withholds only the app's continuation,
+        // and flag the moment the component reads the body — the spec waits on
+        // that instead of sleeping.
+        const pending = originalFetch(input, init);
+        return new Promise((resolve) => {
+          window.__releaseTranscript[id] = async (mode) => {
+            if (mode === 'notfound') {
+              resolve({ status: 404, json: async () => { window.__transcriptSettled[id] = true; return { ok: false, error: 'not found' }; } });
+              return;
+            }
+            const res = await pending;
+            const body = await res.json();
+            resolve({ status: res.status, json: async () => { window.__transcriptSettled[id] = true; return body; } });
+          };
+        });
+      };
+      let current = wrap(window.fetch);
+      Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+    });
+
+    await openTranscripts(page);
+    await page.evaluate((id) => { window.__holdTranscriptIds.push(id); }, STALE_TX);
+    if (c.holdNext) await page.evaluate((id) => { window.__holdTranscriptIds.push(id); }, RICH_SESSION);
+
+    // Open A: its transcript response is held, so the detail pane shows loading.
+    await page.getByRole('button', { name: /Fixture session 0\b/ }).click();
+    await expect(visible(page.getByText('Loading…', { exact: true })).first()).toBeVisible();
+
+    // Open B before A settles.
+    await page.getByRole('button', { name: /Retry backoff cap/ }).click();
+    if (c.holdNext) {
+      await page.waitForFunction((id) => typeof window.__releaseTranscript?.[id] === 'function', RICH_SESSION);
+    } else {
+      await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();
+    }
+
+    // Release the stale A response and wait until the component has read it.
+    await page.evaluate(([id, mode]) => window.__releaseTranscript[id](mode), [STALE_TX, c.mode]);
+    await page.waitForFunction((id) => window.__transcriptSettled?.[id] === true, STALE_TX);
+    // One paint after the read: a fixed component must not have rendered A.
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+    await expect(page.getByText(/Fixture request 0: summarize the module\./)).toHaveCount(0);
+    await expect(page.getByText(/Transcript not found\./)).toHaveCount(0);
+    if (c.holdNext) {
+      // A must not clear B's loading flag either.
+      await expect(visible(page.getByText('Loading…', { exact: true })).first()).toBeVisible();
+      await page.evaluate((id) => window.__releaseTranscript[id]('success'), RICH_SESSION);
+      await page.waitForFunction((id) => window.__transcriptSettled?.[id] === true, RICH_SESSION);
+    }
+    await expect(visible(page.getByText(/Backoff is capped at 30s/)).first()).toBeVisible();
+    await expect(visible(page.getByText(`Retry backoff cap - ${RICH_SESSION}`, { exact: true })).first()).toBeVisible();
+  });
+}

@@ -175,6 +175,22 @@ struct Request {
     stats: singularity_backend::stats::StatsRequest,
 }
 
+// VERIFY: transcript-stdio-cap-clock
+impl Request {
+    /// `cap`/`now_ms` predate the flattened transcript fields, so serde gives
+    /// those keys to this outer struct; carry them across for transcript ops.
+    fn transcript_request(&self) -> singularity_backend::transcript_bridge::TranscriptRequest {
+        let mut transcript = self.transcript.clone();
+        if transcript.cap.is_none() {
+            transcript.cap = self.cap.as_u64().and_then(|n| usize::try_from(n).ok());
+        }
+        if transcript.now_ms.is_none() {
+            transcript.now_ms = self.now_ms.as_u64();
+        }
+        transcript
+    }
+}
+
 fn default_op() -> String {
     "graph".to_owned()
 }
@@ -388,9 +404,10 @@ fn main() -> io::Result<()> {
             ) && request.message_type.as_deref() == Some("transcript_request")
             {
                 if let Some(id) = request.id.clone() {
-                    let body = match transcript_services.service(&request.transcript) {
+                    let transcript = request.transcript_request();
+                    let body = match transcript_services.service(&transcript) {
                         Ok(service) => {
-                            let (op, transcript) = (request.op.clone(), request.transcript.clone());
+                            let (op, transcript) = (request.op.clone(), transcript);
                             let stdout = stdout.clone();
                             let shutting_down = shutting_down.clone();
                             std::thread::spawn(move || {
@@ -424,7 +441,8 @@ fn main() -> io::Result<()> {
                         | "transcript_subagents"
                 ) =>
             {
-                raw_response = Some(transcript_services.dispatch(&request.op, &request.transcript));
+                let transcript = request.transcript_request();
+                raw_response = Some(transcript_services.dispatch(&request.op, &transcript));
                 Value::Null
             }
             Ok(request) if matches!(request.op.as_str(), "agent_stats" | "transcript_stats") => {

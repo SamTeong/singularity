@@ -62,7 +62,12 @@ export function createRustPtyBackend({ executable, args = ['--pty'], cwd, env = 
     }
     if (frame.type === 'event') {
       const session = generations.get(generationKey(frame.id, frame.generation));
-      if (session && latestGeneration.get(frame.id) === frame.generation) session.receive(frame);
+      if (!session) return;
+      if (latestGeneration.get(frame.id) === frame.generation) session.receive(frame);
+      // A superseded generation still owns its exit: release the dead handle so it
+      // cannot linger in `sessions` (stop would send it a stale kill), without
+      // publishing its buffered output/exit callbacks to the current generation.
+      else if (frame.event === 'exit') session.release();
       return;
     }
     if (frame.type !== 'response') {
@@ -104,6 +109,13 @@ export function createRustPtyBackend({ executable, args = ['--pty'], cwd, env = 
       receive(frame) {
         if (!active) { buffered.push(frame); return; }
         dispatch(frame);
+      },
+      // Superseded generation: drop the handle and any buffered frames, dispatch nothing.
+      release() {
+        exited = true;
+        buffered.length = 0;
+        generations.delete(key);
+        sessions.delete(handle);
       },
       serviceExit(code) {
         if (exited) return;

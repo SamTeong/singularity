@@ -98,11 +98,15 @@ impl Pricing {
     }
 
     /// `_price_key` (stats.mjs:575-581): first `base` key that is a substring of
-    /// the lowercased model id, else the default key when it names a real entry.
+    /// the lowercased model id without splitting a numeric version/date segment,
+    /// else the default key when it names a real entry.
     pub fn price_key(&self, model: &str) -> Option<&str> {
         let model = model.to_lowercase();
         for (key, _) in &self.base {
-            if model.contains(key.as_str()) {
+            if model.match_indices(key.as_str()).any(|(at, _)| {
+                !(key.as_bytes().last().is_some_and(u8::is_ascii_digit)
+                    && model.as_bytes().get(at + key.len()).is_some_and(u8::is_ascii_digit))
+            }) {
                 return Some(key);
             }
         }
@@ -116,7 +120,8 @@ impl Pricing {
             !(key.starts_with("opus")
                 || key.starts_with("sonnet")
                 || key.starts_with("haiku")
-                || key.starts_with("fable"))
+                || key.starts_with("fable")
+                || key.starts_with("claude-3-5-haiku"))
         })
     }
 
@@ -620,6 +625,22 @@ mod tests {
             pricing(r#"{"base":{"opus":[1,2,3,4]},"default_key":7}"#).price_key("unknown"),
             None
         );
+    }
+
+    #[test]
+    fn pricing_catalog_resolves_versions_without_matching_date_prefixes() {
+        let catalog: Value = serde_json::from_str(include_str!("../../../server/model-pricing-catalog.json")).unwrap();
+        let table = pricing(&catalog["pricing"].to_string());
+        for (key, _) in &table.base {
+            let model = if key.starts_with("gpt-") || key.starts_with("claude-") {
+                key.clone()
+            } else {
+                format!("claude-{key}-20261119")
+            };
+            assert_eq!(table.price_key(&model), Some(key.as_str()), "{model}");
+        }
+        assert!(!table.is_third_party("claude-3-5-haiku-20241022"));
+        assert_eq!(table.price_key("claude-fable-5-20260609"), Some("fable-5"));
     }
 
     #[test]

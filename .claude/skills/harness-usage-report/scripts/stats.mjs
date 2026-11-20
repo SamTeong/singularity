@@ -570,12 +570,15 @@ function _load_pricing() {
 }
 _load_pricing();
 
-// Returns the first `base` key that's a substring of the (lowercased) model id,
+// Returns the first `base` key matching the lowercased model id without splitting
+// a numeric version/date segment,
 // else DEFAULT_KEY when it names a real PRICE entry, else null (unpriced).
 export function _price_key(model) {
   const m = (model || "").toLowerCase();
   for (const k of Object.keys(PRICE)) {
-    if (m.includes(k)) return k;
+    const at = m.indexOf(k);
+    // A version ending in 2 must not match the start of a 2026 date suffix.
+    if (at >= 0 && !(/\d$/.test(k) && /\d/.test(m[at + k.length] || ""))) return k;
   }
   return DEFAULT_KEY && PRICE[DEFAULT_KEY] !== undefined ? DEFAULT_KEY : null;
 }
@@ -589,7 +592,7 @@ export function _price_key(model) {
 // there's nothing to recompute from.
 function _is_third_party(model) {
   const key = _price_key(model);
-  return key !== null && !/^(opus|sonnet|haiku|fable)/.test(key);
+  return key !== null && !/^(opus|sonnet|haiku|fable|claude-3-5-haiku)/.test(key);
 }
 
 function _msg_cost(model, i, o, cr, cc) {

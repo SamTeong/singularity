@@ -41,6 +41,20 @@ export const bus = new EventEmitter();
 
 // id -> { id, title, cwd, status, pid, createdAt, proc, buf:string[] }
 const agents = new Map();
+// id -> promise for a spawn in progress. Reserved synchronously before the first
+// await so two same-id calls can never both spawn (the pty service replaces the
+// earlier generation, stranding it); released on success and every failure.
+const inflight = new Map();
+// id -> an in-flight spawn that kill()/remove() canceled. Held until that
+// operation settles, so a pty arriving after the removal is killed instead of
+// published, and the id stays reserved until the cleanup finishes.
+const canceled = new Set();
+function track(id, run) {
+  const p = run();
+  const tracked = p.finally(() => { if (inflight.get(id) === tracked) { inflight.delete(id); canceled.delete(id); } });
+  inflight.set(id, tracked);
+  return tracked;
+}
 let recentRepos = [];
 // Set during daemon shutdown: killing live ptys then fires onExit, whose normal
 // path deletes the entry + re-persists — that would wipe running sessions from
@@ -231,11 +245,12 @@ export async function codexThreadFor(id) {
 // in the same cwd later on — see findCodexThread's ceiling. Pin the first
 // answer onto the agent (persisted) and reuse it from then on: restart/reattach
 // resume the SAME thread they were live on, and repeat lookups skip the walk.
-async function rememberCodexThread(a, modelRoute = a.modelRoute) {
+async function rememberCodexThread(a, modelRoute = a.modelRoute, isCurrent = () => true) {
   if (!(a.tool === 'codex' || modelRoute?.isCodexModel) || !a.cwd) return null;
   if (a.threadId) return a.threadId;
   const found = (a.createdAt && await findCodexThread(a.cwd, a.createdAt))
     || (await codexThreadExists(a.id, a.cwd) ? a.id : null);
+  if (!isCurrent()) return null; // stale generation: discovery must not pin/persist
   if (found) { a.threadId = found; try { persist(); } catch { /* pin is a cache — a write failure must not fail the caller */ } }
   return found;
 }
@@ -277,6 +292,10 @@ function rememberRepo(cwd) {
 
 function wire(a) {
   const proc = a.proc;
+  const gen = a.gen;
+  // A replacement spawn bumps the generation; the old pty's callbacks and async
+  // exit cleanup must never mutate the registry entry of the new generation.
+  const current = () => agents.get(a.id) === a && a.gen === gen;
   // Idle heuristic: Claude Code's TUI spinner emits output continuously while
   // working; a turn waiting for user input goes quiet. No pty output for
   // IDLE_MS while 'running' → mark 'idle'; the next byte flips it back.
@@ -285,14 +304,14 @@ function wire(a) {
     a.idleTimer = setTimeout(() => { if (a.status === 'running') setStatus(a, 'idle'); }, IDLE_MS);
   };
   proc.onData((data) => {
-    if (agents.get(a.id) !== a || a.proc !== proc) return;
+    if (!current() || a.proc !== proc) return;
     pushBuf(a, data);
     if (a.status === 'starting' || a.status === 'idle') setStatus(a, 'running');
     bus.emit('output', { id: a.id, data });
     armIdle();
   });
   proc.onExit((exitCode) => {
-    if (agents.get(a.id) !== a || a.proc !== proc) return;
+    if (!current() || a.proc !== proc) return;
     clearTimeout(a.idleTimer);
     a.proc = null;
     // Daemon shutdown killed this pty: keep the entry as-is (agents.json already
@@ -300,12 +319,13 @@ function wire(a) {
     // delete/persist here or the running session vanishes from the list.
     if (draining) return;
     // Theme-change respawn (see respawnAll): resume with the same config
-    // instead of the normal exited/removed handling below. setImmediate defers
-    // create() until this onExit call (and the Map mutation here) fully unwinds.
+    // instead of the normal exited/removed handling below. create() reserves the
+    // id synchronously (before its first await), so a kill()/remove() landing in
+    // this window cancels the replacement like any other pending spawn.
     if (a.respawnAfterExit) {
       const cfg = a.respawnAfterExit;
       agents.delete(a.id); // drop the dead entry so create() takes the fresh-spawn-over-existing-log path
-      setImmediate(() => { void create({ sessionId: a.id, ...cfg }).catch((e) => logger?.warn({ err: e.message }, 'respawn failed')); });
+      void create({ sessionId: a.id, ...cfg }).catch((e) => logger?.warn({ err: e.message }, 'respawn failed'));
       persist();
       emitList();
       return;
@@ -320,8 +340,10 @@ function wire(a) {
     }
     setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
     void getModelRoute(a.model, a.tool).then(async (modelRoute) => {
+      if (!current()) return; // a reattach/create replaced this generation while routing
       const isCodex = a.tool === 'codex' || modelRoute.isCodexModel;
-      const codexThreadId = isCodex ? await rememberCodexThread(a, modelRoute) : null;
+      const codexThreadId = isCodex ? await rememberCodexThread(a, modelRoute, current) : null;
+      if (!current()) return;
       const resumeCmd = isCodex
         ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
         : modelRoute.isClaudeModel
@@ -329,11 +351,13 @@ function wire(a) {
           : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
       bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
     }).catch((error) => {
+      if (!current()) return;
       logger?.warn({ err: error.message, id: a.id }, 'could not build agent resume command');
       bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume command unavailable\x1b[0m\r\n` });
     }).finally(() => {
       // Drop the session from the list rather than leaving a dead 'exited' row;
       // resume still works off the on-disk session log (new session, same id).
+      if (!current()) return; // the new generation owns the entry: no stale delete/emit
       agents.delete(a.id);
       persist();
       emitList();
@@ -476,30 +500,38 @@ export async function create({ cwd, title, model, scopes, sessionId, prompt, per
     // rather than refusing. reattach keeps the original model + skill-scopes.
     return reattach(id);
   }
-  if ((tool === 'codex' || (modelRoute ??= await getModelRoute(model, tool)).isCodexModel) && await codexOwnerForThread(id, cwd)) {
-    throw new Error('codex thread already in use');
-  }
-  if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
-  modelRoute ??= await getModelRoute(model, tool);
-  if (modelRoute.toolModelError) throw new Error(modelRoute.toolModelError);
-  const displayName = title || id.slice(0, 8);
-  // `createdAt` is only set by respawn() (theme toggle), where the codex thread
-  // must be recovered so history survives. A genuinely fresh create must NOT
-  // pass one: findCodexThread matches on cwd+time, not id, so within its skew
-  // window it would resume an unrelated codex session the user started in the
-  // same cwd by hand.
-  const spawnedAt = createdAt || Date.now();
-  const { bin, args } = await buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt, modelRoute);
-  ensureTrusted(cwd);
-  if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
-  const proc = await ptyBackend.spawn({ id, bin, args, cwd, cols: 80, rows: 24, env: spawnEnv(mock) });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, modelRoute, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
-  agents.set(id, a);
-  wire(a);
-  rememberRepo(cwd);
-  persist();
-  emitList();
-  return a;
+  // Reserve the id synchronously, before the first await (codex ownership,
+  // model routing, build, spawn): a concurrent create for the same id must be
+  // rejected rather than spawn a second generation that replaces this one.
+  if (inflight.has(id)) throw new Error('session id already in use');
+  return track(id, async () => {
+    if ((tool === 'codex' || (modelRoute ??= await getModelRoute(model, tool)).isCodexModel) && await codexOwnerForThread(id, cwd)) {
+      throw new Error('codex thread already in use');
+    }
+    if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
+    modelRoute ??= await getModelRoute(model, tool);
+    if (modelRoute.toolModelError) throw new Error(modelRoute.toolModelError);
+    const displayName = title || id.slice(0, 8);
+    // `createdAt` is only set by respawn() (theme toggle), where the codex thread
+    // must be recovered so history survives. A genuinely fresh create must NOT
+    // pass one: findCodexThread matches on cwd+time, not id, so within its skew
+    // window it would resume an unrelated codex session the user started in the
+    // same cwd by hand.
+    const spawnedAt = createdAt || Date.now();
+    const { bin, args } = await buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt, modelRoute);
+    ensureTrusted(cwd);
+    if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
+    if (canceled.has(id)) throw new Error('session was removed during spawn');
+    const proc = await ptyBackend.spawn({ id, bin, args, cwd, cols: 80, rows: 24, env: spawnEnv(mock) });
+    if (canceled.has(id)) { discardProc(proc, id); throw new Error('session was removed during spawn'); }
+    const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, modelRoute, gen: 0, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
+    agents.set(id, a);
+    wire(a);
+    rememberRepo(cwd);
+    persist();
+    emitList();
+    return a;
+  });
 }
 
 // Claude logs a session to ~/.claude/projects/<encoded-cwd>/<id>.jsonl, where
@@ -532,17 +564,26 @@ function sessionLogExists(cwd, id) {
 // buildSpawn keeps the agent's model + skill-scopes from create time.
 export async function reattach(id) {
   const a = agents.get(id);
-  if (!a || a.proc) return a;
-  const modelRoute = await getModelRoute(a.model, a.tool);
-  const { bin, args } = await buildSpawn(a, undefined, modelRoute);
-  ensureTrusted(a.cwd);
-  if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
-  const proc = await ptyBackend.spawn({ id, bin, args, cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock) });
-  a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
-  wire(a);
-  persist();
-  emitList();
-  return a;
+  if (a?.proc) return a;
+  // A create/reattach for this id is already spawning: share its result instead
+  // of racing a second spawn (works even before the create has registered).
+  if (inflight.has(id)) return inflight.get(id);
+  if (!a) return a;
+  return track(id, async () => {
+    a.gen = (a.gen || 0) + 1; // new generation: the old pty's exit cleanup must not touch it
+    const modelRoute = await getModelRoute(a.model, a.tool);
+    const { bin, args } = await buildSpawn(a, undefined, modelRoute);
+    ensureTrusted(a.cwd);
+    if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
+    if (canceled.has(id)) throw new Error('session was removed during spawn');
+    const proc = await ptyBackend.spawn({ id, bin, args, cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock) });
+    if (canceled.has(id)) { discardProc(proc, id); throw new Error('session was removed during spawn'); }
+    a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
+    wire(a);
+    persist();
+    emitList();
+    return a;
+  });
 }
 
 // Resolve wt.exe: prefer the Store App-Execution-Alias path (unambiguous),
@@ -621,12 +662,29 @@ function killPty(proc, id) {
   try { void proc.kill().catch((error) => logger?.warn({ err: error.message, id }, 'agent kill failed')); }
   catch (error) { logger?.warn({ err: error.message, id }, 'agent kill failed'); }
 }
+// A pty whose spawn kill/remove canceled has no registry entry to own it. The
+// adapter buffers events until activate(), so without activating here the exit
+// event would never dispatch and the handle would never be released: wire no-op
+// handlers, activate, then kill.
+function discardProc(proc, id) {
+  try { proc.onData(() => {}).onExit(() => {}); proc.activate(); } catch { /* adapter without handlers */ }
+  killPty(proc, id);
+}
+// Mark an in-flight spawn for this id as canceled; the reservation itself is
+// released only when that operation settles (track's finally).
+function cancelPending(id) {
+  if (inflight.has(id)) canceled.add(id);
+}
 
 // kill live agent; remove dead/detached agent from registry.
 export function kill(id) {
   const a = agents.get(id);
-  if (!a) return;
-  if (a.proc) { killPty(a.proc, id); return; } // onExit -> status exited + persist
+  if (!a) { cancelPending(id); return; } // pending fresh create: never publish it
+  // VERIFY: respawn-cancel-before-exit
+  // An explicit kill cancels a theme respawn queued by respawn() that has not
+  // fired yet; onExit would otherwise start the replacement it prefers.
+  if (a.proc) { a.respawnAfterExit = null; killPty(a.proc, id); return; } // onExit -> status exited + persist
+  cancelPending(id); // pending reattach: discard the pty it is about to attach
   agents.delete(id);
   persist();
   emitList();
@@ -639,8 +697,10 @@ export function kill(id) {
 // leave the session list for good.
 export function remove(id) {
   const a = agents.get(id);
-  if (!a) return;
-  if (a.proc) { a.removeOnExit = true; killPty(a.proc, id); return; } // onExit -> delete
+  if (!a) { cancelPending(id); return; } // pending fresh create: never publish it
+  // Same explicit cancel as kill(): a queued respawn must not outlive remove().
+  if (a.proc) { a.respawnAfterExit = null; a.removeOnExit = true; killPty(a.proc, id); return; } // onExit -> delete
+  cancelPending(id); // pending reattach: discard the pty it is about to attach
   agents.delete(id);
   persist();
   emitList();

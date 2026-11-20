@@ -85,7 +85,7 @@ after(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawn, respawnAll, kill, isLive, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, getBuf, getWritten, getStatus, input, resize, sweepTmpFiles, codexOwnerForThread, isLiveSession } = registry;
+const { encodeCwd, untildify, buildSpawn, init, fork, create, reattach, remove, snapshot, respawn, respawnAll, kill, isLive, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, getBuf, getWritten, getStatus, input, resize, sweepTmpFiles, codexOwnerForThread, isLiveSession } = registry;
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -119,6 +119,49 @@ function waitForRemoval(id) {
     bus.on('list', onList);
   });
 }
+
+// Deterministic pty for the same-id race tests: every spawn parks until the
+// test releases it by index (so two callers can be observed mid-flight), and
+// the test drives exit explicitly through `exit(index)`.
+function manualPtyBackend() {
+  const spawns = [];
+  const handles = [];
+  const waiters = [];
+  return {
+    spawn(options) {
+      const handle = {
+        pid: 9000 + handles.length,
+        killed: false,
+        onData(fn) { handle.dataFn = fn; return handle; },
+        onExit(fn) { handle.exitFn = fn; return handle; },
+        activate() { return handle; },
+        write: async () => {},
+        resize: async () => {},
+        kill: async () => { handle.killed = true; },
+      };
+      spawns.push(options);
+      handles.push(handle);
+      return new Promise((resolve) => waiters.push({ handle, resolve }));
+    },
+    release(index) { waiters[index].resolve(waiters[index].handle); },
+    exit(index, code = 0) { handles[index].exitFn?.(code); },
+    // Spawning may pass through an async route/build before it reaches here, so
+    // tests wait for the parked spawn instead of assuming a fixed tick count.
+    async waitForSpawn(count) { while (spawns.length < count) await new Promise((resolve) => setImmediate(resolve)); },
+    spawns,
+    handles,
+  };
+}
+
+function seedDetached(id) {
+  writeFileSync(join(scratch, 'singularity', 'state', 'agents.json'), JSON.stringify({
+    agents: [{ id, title: 'seeded', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    recentRepos: [],
+  }));
+  init(); // loads the record as 'detached' (proc: null)
+}
+
+const claudeRoute = { isClaudeModel: true, isCodexModel: false };
 
 test('registry activates early output after registration and contains async adapter errors', async () => {
   const id = '10000000-aaaa-bbbb-cccc-100000000002';
@@ -419,6 +462,94 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
   }
 });
 
+// A kill/remove landing between a respawn's exit and its replacement create()
+// used to see no row and no in-flight spawn, so the replacement published anyway
+// and the session reappeared. onExit now reserves the replacement synchronously,
+// so the existing pending-spawn cancellation covers this window too.
+for (const op of ['kill', 'remove']) {
+  test(`${op} during an exit-to-respawn window cancels the replacement spawn`, async () => {
+    const id = op === 'kill' ? '41000000-dddd-eeee-ffff-410000000001' : '41000000-dddd-eeee-ffff-410000000002';
+    const backend = manualPtyBackend();
+    registry.setPtyBackend(backend);
+    modelStore.setModelsBackend({ modelRoute: async () => claudeRoute });
+    const events = [];
+    const onOutput = (event) => { if (event.id === id) events.push(['output', event.data]); };
+    const onStatus = (event) => { if (event.id === id) events.push(['status', event.status]); };
+    bus.on('output', onOutput);
+    bus.on('status', onStatus);
+    try {
+      const creating = create({ cwd: scratch, title: 'respawn-window', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+      await backend.waitForSpawn(1);
+      backend.release(0);
+      await creating;
+      assert.equal(await respawn(id), true);
+      backend.exit(0); // onExit drops the row and starts the replacement create
+      if (op === 'kill') kill(id); else remove(id);
+      // Let the replacement resolve its route and its cancellation settle; a
+      // buggy deferred create parks in spawn, so release anything it started.
+      for (let tick = 0; tick < 5; tick++) {
+        for (let i = 0; i < backend.handles.length; i++) backend.release(i);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      assert.equal(snapshot().some((row) => row.id === id), false, 'the canceled replacement never publishes a row');
+      assert.deepEqual(events, [], 'the canceled replacement emits no output or status');
+      assert.equal(backend.spawns.length, 1, 'the canceled replacement never reaches the backend');
+      const retried = create({ cwd: scratch, title: 'retry', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+      await backend.waitForSpawn(2);
+      backend.release(1);
+      assert.equal((await retried).id, id);
+      assert.equal(isLive(id), true, 'the cancelled respawn releases the id');
+    } finally {
+      bus.off('output', onOutput);
+      bus.off('status', onStatus);
+      for (const handle of backend.handles) handle.exitFn?.(0);
+      await waitForRemoval(id);
+      modelStore.setModelsBackend(modelBackend);
+      registry.setPtyBackend(ptyBackend);
+    }
+  });
+}
+
+// VERIFY: respawn-cancel-before-exit
+// A kill/remove landing after respawn() queues the replacement (respawnAfterExit
+// set) but before the old pty's onExit has fired. onExit prefers respawnAfterExit
+// over removeOnExit, so unless an explicit cancel clears the queue the normal
+// user kill/remove still starts a replacement.
+for (const op of ['kill', 'remove']) {
+  test(`${op} before the respawn exit cancels the queued replacement`, async () => {
+    const id = op === 'kill' ? '42000000-dddd-eeee-ffff-420000000001' : '42000000-dddd-eeee-ffff-420000000002';
+    const backend = manualPtyBackend();
+    registry.setPtyBackend(backend);
+    modelStore.setModelsBackend({ modelRoute: async () => claudeRoute });
+    try {
+      const creating = create({ cwd: scratch, title: 'pre-exit-respawn', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+      await backend.waitForSpawn(1);
+      backend.release(0);
+      await creating;
+
+      // respawn() queues the config and kills the old pty; the manual backend
+      // holds onExit back, so the queued replacement is still pending.
+      assert.equal(await respawn(id), true);
+      assert.equal(isLive(id), true, 'old pty is still registered before its exit');
+      if (op === 'kill') kill(id); else remove(id);
+
+      backend.exit(0); // the old pty exits after the explicit cancel
+      for (let tick = 0; tick < 5; tick++) {
+        for (let i = 0; i < backend.handles.length; i++) backend.release(i);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      assert.equal(backend.spawns.length, 1, 'the queued respawn never reaches the backend');
+      assert.equal(snapshot().some((row) => row.id === id), false, 'the canceled agent stays gone');
+      assert.equal(isLive(id), false);
+    } finally {
+      for (const handle of backend.handles) handle.exitFn?.(0);
+      await waitForRemoval(id);
+      modelStore.setModelsBackend(modelBackend);
+      registry.setPtyBackend(ptyBackend);
+    }
+  });
+}
+
 test('Codex transcript liveness resolves a distinct thread id and blocks duplicate owned resumes', async () => {
   const agentId = '90000000-aaaa-bbbb-cccc-900000000005';
   const threadId = 'dddddddd-eeee-ffff-0000-444444444444';
@@ -581,6 +712,335 @@ test('agent exit bridge failure still cleans up and emits a handled resume statu
     await modelStore.setModels(previous);
   }
 });
+
+// --- same-id spawn serialization ---
+// create() used to check the registry, then await route/build/spawn, then insert:
+// two concurrent same-id calls both spawned (Rust replaces the first generation).
+// The id must be reserved synchronously before the first await, so one caller
+// spawns and the other is rejected/shared deterministically.
+test('create: concurrent same-id calls reserve before the first await — one spawn, loser rejected', async () => {
+  const id = '81000000-0000-4000-8000-000000000001';
+  const backend = manualPtyBackend();
+  registry.setPtyBackend(backend);
+  try {
+    const first = create({ cwd: scratch, title: 'first', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    await new Promise((resolve) => setImmediate(resolve)); // first is parked inside ptyBackend.spawn
+    const second = create({ cwd: scratch, title: 'second', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    const secondResult = second.then((value) => ({ value }), (error) => ({ error }));
+    await new Promise((resolve) => setImmediate(resolve));
+    for (let i = 0; i < backend.handles.length; i++) backend.release(i);
+    const firstAgent = await first;
+    const settled = await secondResult;
+    assert.equal(backend.spawns.length, 1, 'same-id create must not spawn twice');
+    assert.ok(settled.error, 'the second caller is rejected while the first owns the id');
+    assert.match(settled.error.message, /already in use/);
+    assert.equal(firstAgent.id, id);
+    assert.equal(isLive(id), true);
+  } finally {
+    for (const handle of backend.handles) handle.exitFn?.(0);
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+  }
+});
+
+test('create: a slow route lookup in the first caller cannot let a second caller spawn the same id', async () => {
+  const id = '81000000-0000-4000-8000-000000000002';
+  const backend = manualPtyBackend();
+  registry.setPtyBackend(backend);
+  let releaseRoute;
+  let markRoute;
+  const routeStarted = new Promise((resolve) => { markRoute = resolve; });
+  const routeGate = new Promise((resolve) => { releaseRoute = resolve; });
+  modelStore.setModelsBackend({ modelRoute: async () => { markRoute(); return routeGate; } });
+  try {
+    const slow = create({ cwd: scratch, title: 'slow', model: 'claude', sessionId: id }); // awaits its route
+    const slowResult = slow.then((value) => ({ value }), (error) => ({ error }));
+    await routeStarted;
+    const fast = create({ cwd: scratch, title: 'fast', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    const fastResult = fast.then((value) => ({ value }), (error) => ({ error }));
+    await new Promise((resolve) => setImmediate(resolve));
+    releaseRoute(claudeRoute);
+    await new Promise((resolve) => setImmediate(resolve)); // slow reaches its spawn
+    for (let i = 0; i < backend.handles.length; i++) backend.release(i);
+    const [slowSettled, fastSettled] = await Promise.all([slowResult, fastResult]);
+    assert.equal(backend.spawns.length, 1, 'slow and fast callers must not both spawn');
+    assert.equal(slowSettled.error, undefined, 'the first (slow) caller owns the id');
+    assert.ok(fastSettled.error, 'the second caller is rejected while the first owns the id');
+    assert.match(fastSettled.error.message, /already in use/);
+  } finally {
+    for (const handle of backend.handles) handle.exitFn?.(0);
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+    modelStore.setModelsBackend(modelBackend);
+  }
+});
+
+test('reattach: concurrent calls share one reserved spawn', async () => {
+  const id = '81000000-0000-4000-8000-000000000003';
+  seedDetached(id);
+  const backend = manualPtyBackend();
+  registry.setPtyBackend(backend);
+  modelStore.setModelsBackend({ modelRoute: async () => claudeRoute });
+  try {
+    const first = reattach(id);
+    await new Promise((resolve) => setImmediate(resolve)); // parked in spawn
+    const second = reattach(id);
+    await new Promise((resolve) => setImmediate(resolve));
+    for (let i = 0; i < backend.handles.length; i++) backend.release(i);
+    const [a1, a2] = await Promise.all([first, second]);
+    assert.equal(backend.spawns.length, 1, 'concurrent reattach must not spawn twice');
+    assert.equal(a1, a2);
+    assert.equal(a1.pid, backend.handles[0].pid, 'no later spawn replaced the first pty');
+    assert.equal(isLive(id), true);
+  } finally {
+    for (const handle of backend.handles) handle.exitFn?.(0);
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+    modelStore.setModelsBackend(modelBackend);
+  }
+});
+
+test('create/reattach overlap: reattach joins an in-flight fresh create instead of returning nothing', async () => {
+  const id = '81000000-0000-4000-8000-000000000004';
+  const backend = manualPtyBackend();
+  registry.setPtyBackend(backend);
+  try {
+    const creating = create({ cwd: scratch, title: 'first', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    await new Promise((resolve) => setImmediate(resolve)); // parked in spawn, not registered yet
+    const joining = reattach(id);
+    const joiningResult = joining.then((value) => ({ value }), (error) => ({ error }));
+    await new Promise((resolve) => setImmediate(resolve));
+    for (let i = 0; i < backend.handles.length; i++) backend.release(i);
+    const agent = await creating;
+    const joined = await joiningResult;
+    assert.equal(backend.spawns.length, 1, 'reattach must not race a pending create');
+    assert.equal(joined.error, undefined);
+    assert.equal(joined.value, agent, 'reattach shares the pending create result');
+    assert.equal(isLive(id), true);
+  } finally {
+    for (const handle of backend.handles) handle.exitFn?.(0);
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+  }
+});
+
+test('create: a failed spawn releases the reservation so the id can be retried', async () => {
+  const id = '81000000-0000-4000-8000-000000000005';
+  let attempts = 0;
+  const handles = [];
+  const backend = {
+    spawn: async () => {
+      if (attempts++ === 0) throw new Error('spawn exploded');
+      const handle = { pid: 9500, onData() { return handle; }, onExit(fn) { handle.exitFn = fn; return handle; }, activate() { return handle; }, write: async () => {}, resize: async () => {}, kill: async () => {} };
+      handles.push(handle);
+      return handle;
+    },
+  };
+  registry.setPtyBackend(backend);
+  try {
+    await assert.rejects(
+      create({ cwd: scratch, title: 'boom', model: 'claude', sessionId: id, modelRoute: claudeRoute }),
+      /spawn exploded/,
+    );
+    assert.equal(snapshot().some((agent) => agent.id === id), false, 'failed create never registers');
+    const retried = await create({ cwd: scratch, title: 'retry', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    assert.equal(retried.id, id);
+    assert.equal(isLive(id), true);
+  } finally {
+    for (const handle of handles) handle.exitFn?.(0);
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+  }
+});
+
+// A stale exit's async footer/cleanup must not touch a newer generation: the
+// pty service replaced the old generation, but the old exit handler still ran
+// route/thread work after clearing proc. Guard by object + generation at every
+// await boundary.
+test('stale exit after reattach: old cleanup emits no footer and keeps the new pty', async () => {
+  const id = '81000000-0000-4000-8000-000000000006';
+  const backend = manualPtyBackend();
+  registry.setPtyBackend(backend);
+  let releaseExitRoute;
+  let markExitRoute;
+  const exitRouteStarted = new Promise((resolve) => { markExitRoute = resolve; });
+  const exitRoute = new Promise((resolve) => { releaseExitRoute = resolve; });
+  let routeCalls = 0;
+  modelStore.setModelsBackend({ modelRoute: async () => {
+    routeCalls++;
+    if (routeCalls === 1) { markExitRoute(); return exitRoute; }
+    return claudeRoute;
+  } });
+  const output = [];
+  const onOutput = (event) => { if (event.id === id) output.push(event.data); };
+  bus.on('output', onOutput);
+  try {
+    const creating = create({ cwd: scratch, title: 'stale', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    await new Promise((resolve) => setImmediate(resolve)); // create parked in spawn
+    backend.release(0);
+    const a = await creating;
+    backend.exit(0); // old pty dies; its route work parks
+    await exitRouteStarted;
+    const reattaching = reattach(id); // new generation starts while old cleanup is pending
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(backend.spawns.length, 2, 'reattach reached its own spawn');
+    releaseExitRoute({ isClaudeModel: true, isCodexModel: false });
+    await new Promise((resolve) => setImmediate(resolve)); // stale cleanup resolves
+    assert.ok(snapshot().some((entry) => entry.id === id), 'stale exit must not delete the reattached entry');
+    backend.release(1);
+    const b = await reattaching;
+    assert.equal(b, a);
+    assert.equal(b.pid, backend.handles[1].pid);
+    assert.equal(isLive(id), true);
+    assert.equal(output.some((data) => /agent exited/.test(data)), false, 'no footer for the obsolete generation');
+  } finally {
+    bus.off('output', onOutput);
+    for (const handle of backend.handles) handle.exitFn?.(0);
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+    modelStore.setModelsBackend(modelBackend);
+  }
+});
+
+test('stale exit rejection after a fresh create: no fallback footer and no deletion of the new entry', async () => {
+  const id = '81000000-0000-4000-8000-000000000007';
+  const backend = manualPtyBackend();
+  registry.setPtyBackend(backend);
+  let rejectExitRoute;
+  let markExitRoute;
+  const exitRouteStarted = new Promise((resolve) => { markExitRoute = resolve; });
+  const exitRoute = new Promise((resolve, reject) => { rejectExitRoute = reject; });
+  let routeCalls = 0;
+  modelStore.setModelsBackend({ modelRoute: async () => {
+    routeCalls++;
+    if (routeCalls === 1) { markExitRoute(); return exitRoute; }
+    return claudeRoute;
+  } });
+  const output = [];
+  const onOutput = (event) => { if (event.id === id) output.push(event.data); };
+  bus.on('output', onOutput);
+  try {
+    const creating = create({ cwd: scratch, title: 'stale', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    await new Promise((resolve) => setImmediate(resolve)); // create parked in spawn
+    backend.release(0);
+    await creating;
+    backend.exit(0);
+    await exitRouteStarted;
+    remove(id); // detached entry dropped while the old exit cleanup is pending
+    const replacing = create({ cwd: scratch, title: 'replacement', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    await new Promise((resolve) => setImmediate(resolve));
+    backend.release(1);
+    const b = await replacing;
+    rejectExitRoute(new Error('route lookup failed'));
+    await new Promise((resolve) => setImmediate(resolve)); // stale rejection settles
+    const entry = snapshot().find((e) => e.id === id);
+    assert.ok(entry, 'stale rejection must not delete the new entry');
+    assert.equal(entry.pid, backend.handles[1].pid);
+    assert.equal(b.pid, backend.handles[1].pid);
+    assert.equal(output.some((data) => /resume command unavailable/.test(data)), false, 'no fallback footer for the obsolete generation');
+  } finally {
+    bus.off('output', onOutput);
+    for (const handle of backend.handles) handle.exitFn?.(0);
+    await waitForRemoval(id);
+    registry.setPtyBackend(ptyBackend);
+    modelStore.setModelsBackend(modelBackend);
+  }
+});
+
+// --- kill/remove during a pending spawn ---
+// kill()/remove() used to see proc:null while route/build/spawn was in flight and
+// drop the row; the spawn then resolved and published (create) or attached
+// (reattach) an unowned live pty that no registry drain could kill. Cancellation
+// must stop publication, skip a spawn that has not started, and kill a pty that
+// arrives after removal — while the id stays reserved until the operation settles.
+const pendingKinds = ['create', 'reattach'];
+const pendingOps = ['kill', 'remove'];
+let pendingCase = 0;
+for (const kind of pendingKinds) {
+  for (const op of pendingOps) {
+    pendingCase++;
+    const id = `83000000-0000-4000-8000-00000000000${pendingCase}`;
+    test(`${op} during a pending ${kind} spawn: nothing published, arriving pty killed, id reusable after settle`, async () => {
+      if (kind === 'reattach') seedDetached(id);
+      const backend = manualPtyBackend();
+      registry.setPtyBackend(backend);
+      const events = [];
+      const onOutput = (event) => { if (event.id === id) events.push(['output', event.data]); };
+      const onStatus = (event) => { if (event.id === id) events.push(['status', event.status]); };
+      bus.on('output', onOutput);
+      bus.on('status', onStatus);
+      try {
+        const pending = kind === 'create'
+          ? create({ cwd: scratch, title: 'pending', model: 'claude', sessionId: id, modelRoute: claudeRoute })
+          : reattach(id);
+        const settled = pending.then((value) => ({ value }), (error) => ({ error }));
+        await backend.waitForSpawn(1); // parked in ptyBackend.spawn
+        assert.equal(backend.spawns.length, 1, 'the spawn reached the backend before cancellation');
+        if (op === 'kill') kill(id); else remove(id);
+        assert.equal(snapshot().some((row) => row.id === id), false, 'cancellation publishes no row');
+        backend.release(0);
+        const result = await settled;
+        assert.ok(result.error, 'the canceled spawn rejects');
+        assert.equal(result.value, undefined, 'no agent is returned');
+        assert.match(result.error.message, /removed/);
+        assert.equal(snapshot().some((row) => row.id === id), false, 'the late pty is never published');
+        assert.equal(backend.handles[0].killed, true, 'the late pty is killed');
+        assert.deepEqual(events, [], 'the canceled spawn emits no output or status');
+        const retried = create({ cwd: scratch, title: 'retry', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+        await backend.waitForSpawn(2);
+        backend.release(1);
+        assert.equal((await retried).id, id);
+        assert.equal(isLive(id), true, 'the id is reusable after the cancellation settles');
+      } finally {
+        bus.off('output', onOutput);
+        bus.off('status', onStatus);
+        for (const handle of backend.handles) handle.exitFn?.(0);
+        await waitForRemoval(id);
+        registry.setPtyBackend(ptyBackend);
+      }
+    });
+
+    pendingCase++;
+    const earlyId = `84000000-0000-4000-8000-00000000000${pendingCase}`;
+    test(`${op} before a pending ${kind} spawn starts: no pty is spawned`, async () => {
+      if (kind === 'reattach') seedDetached(earlyId);
+      const backend = manualPtyBackend();
+      registry.setPtyBackend(backend);
+      let releaseRoute;
+      let markRoute;
+      const routeStarted = new Promise((resolve) => { markRoute = resolve; });
+      const routeGate = new Promise((resolve) => { releaseRoute = resolve; });
+      modelStore.setModelsBackend({ modelRoute: async () => { markRoute(); return routeGate; } });
+      try {
+        const pending = kind === 'create'
+          ? create({ cwd: scratch, title: 'gated', model: 'claude', sessionId: earlyId }) // parked on its route lookup
+          : reattach(earlyId); // reattach always awaits its route
+        const settled = pending.then((value) => ({ value }), (error) => ({ error }));
+        await routeStarted;
+        if (op === 'kill') kill(earlyId); else remove(earlyId);
+        assert.equal(snapshot().some((row) => row.id === earlyId), false, 'cancellation publishes no row');
+        releaseRoute(claudeRoute);
+        await new Promise((resolve) => setImmediate(resolve)); // canceled code rejects here; a buggy one parks in spawn
+        for (let i = 0; i < backend.handles.length; i++) backend.release(i); // let a buggy spawn settle so the assertion fails, not hangs
+        const result = await settled;
+        assert.ok(result.error, 'the canceled spawn rejects');
+        assert.match(result.error.message, /removed/);
+        assert.equal(backend.spawns.length, 0, 'a canceled spawn must not reach the backend');
+        modelStore.setModelsBackend(modelBackend);
+        const retried = create({ cwd: scratch, title: 'retry', model: 'claude', sessionId: earlyId, modelRoute: claudeRoute });
+        await backend.waitForSpawn(1);
+        backend.release(0);
+        assert.equal((await retried).id, earlyId);
+        assert.equal(isLive(earlyId), true, 'the id is reusable after the cancellation settles');
+      } finally {
+        modelStore.setModelsBackend(modelBackend);
+        for (const handle of backend.handles) handle.exitFn?.(0);
+        await waitForRemoval(earlyId);
+        registry.setPtyBackend(ptyBackend);
+      }
+    });
+  }
+}
 
 test('beginDrain: live session persists to agents.json and survives its pty exit', async () => {
   const id = '50000000-aaaa-bbbb-cccc-500000000005';
