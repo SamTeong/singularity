@@ -375,7 +375,7 @@ mod tests {
             assert_eq!(status, 400);
             assert_eq!(
                 body["error"],
-                "bad state for todo (expected analyzing|clarifying|awaiting plan approval|rate-limited)"
+                "bad state for todo (expected analyzing|clarifying|awaiting plan approval|usage-limited|rate-limited)"
             );
 
             let (status, body) = collect(

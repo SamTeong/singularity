@@ -668,7 +668,9 @@ export async function fork(srcId, title) {
 
 export function input(id, data) {
   const proc = agents.get(id)?.proc;
-  if (proc) void proc.write(data).catch((error) => logger?.warn({ err: error.message, id }, 'agent input failed'));
+  if (!proc) return;
+  void proc.write(data).catch((error) => logger?.warn({ err: error.message, id }, 'agent input failed'));
+  bus.emit('input', { id, data }); // tasks.mjs: input to a limited session clears its overlay
 }
 export function resize(id, cols, rows) {
   try { const result = agents.get(id)?.proc?.resize(cols, rows); result?.catch(() => {}); } catch {}

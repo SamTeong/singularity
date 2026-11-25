@@ -107,6 +107,9 @@ struct Request {
     max_buffer: Value,
     #[serde(default)]
     env: Value,
+    /// One-shot stdin payload (the prompt); null keeps the immediate EOF.
+    #[serde(default, rename = "input")]
+    stdin_input: Value,
     #[serde(default)]
     pid: Value,
     #[serde(default)]
@@ -327,6 +330,7 @@ fn main() -> io::Result<()> {
                     let timeout_ms = request.timeout_ms.as_f64();
                     let max_buffer = request.max_buffer.as_f64();
                     let env = request.env.clone();
+                    let input = request.stdin_input.as_str().map(str::to_owned);
                     let task_request_id = id.clone();
                     let task_stdout = stdout.clone();
                     let task_shutting_down = shutting_down.clone();
@@ -336,12 +340,13 @@ fn main() -> io::Result<()> {
                         let _runtime = runtime.enter();
                         one_shot_tasks.spawn(async move {
                             let response = match tokio::task::spawn_blocking(move || {
-                                singularity_backend::oneshot::run(
+                                singularity_backend::oneshot::run_with_input(
                                     bin.as_deref(),
                                     &args,
                                     timeout_ms,
                                     max_buffer,
                                     Some(&env),
+                                    input.as_deref(),
                                 )
                             })
                             .await
@@ -887,12 +892,13 @@ fn main() -> io::Result<()> {
             Ok(request) if request.op == "explorer_rename" => {
                 singularity_backend::explorer_fs::rename(request.from.as_str(), request.to.as_str())
             }
-            Ok(request) if request.op == "oneshot" => singularity_backend::oneshot::run(
+            Ok(request) if request.op == "oneshot" => singularity_backend::oneshot::run_with_input(
                 request.bin.as_str(),
                 &request.args,
                 request.timeout_ms.as_f64(),
                 request.max_buffer.as_f64(),
                 Some(&request.env),
+                request.stdin_input.as_str(),
             ),
             Ok(request) if request.op == "git" => singularity_backend::oneshot::run_git(
                 request.bin.as_str(),

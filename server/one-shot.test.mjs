@@ -38,7 +38,9 @@ test('claude branch builds read-only argv and returns the stdout envelope', asyn
   const out = await runOneShotPrompt('claude', 'haiku', 'summarise day', { spawn: fakeSpawn(envelope) });
   assert.equal(out, envelope);
   assert.equal(calls.at(-1).file, CLAUDE_BIN);
-  assert.deepEqual(calls.at(-1).args, ['-p', 'summarise day', '--model', 'haiku', '--output-format', 'json', '--no-session-persistence']);
+  // The prompt rides stdin (opts.input), never argv.
+  assert.deepEqual(calls.at(-1).args, ['-p', '--model', 'haiku', '--output-format', 'json', '--no-session-persistence']);
+  assert.equal(calls.at(-1).opts.input, 'summarise day');
   assert.equal(calls.at(-1).opts.timeout, 120_000);
   const meta = await runOneShotPrompt('claude', 'haiku', 'p', { spawn: fakeSpawn(envelope), includeMetadata: true });
   assert.deepEqual(meta, { answer: envelope, usage: { input_tokens: 3, output_tokens: 5 } });
@@ -53,6 +55,22 @@ test('claude branch extracts the failure reason from the error stdout envelope',
   await assert.rejects(runOneShotPrompt('claude', 'haiku', 'p', { spawn: fail }), /Not logged in · run \/login/);
 });
 
+test('claude branch rejects an is_error envelope on exit 0', async () => {
+  const limited = JSON.stringify({ is_error: true, subtype: 'success', result: 'usage limit reached' });
+  await assert.rejects(runOneShotPrompt('claude', 'haiku', 'p', { spawn: fakeSpawn(limited) }), /^Error: usage limit reached$/);
+  const bare = JSON.stringify({ is_error: true, subtype: 'error_max_turns' });
+  await assert.rejects(runOneShotPrompt('claude', 'haiku', 'p', { spawn: fakeSpawn(bare), includeMetadata: true }), /^Error: error_max_turns$/);
+});
+
+test('the fallback execFile path writes the prompt to stdin and closes it', async () => {
+  const ended = [];
+  const spawn = () => Object.assign(Promise.resolve({ stdout: 'raw' }), {
+    child: { stdin: { end: (data) => ended.push(data) } },
+  });
+  await runOneShotPrompt('ollama', 'llama', 'long prompt', { spawn });
+  assert.deepEqual(ended, ['long prompt']);
+});
+
 test('codex branch reads the -o answer file, parses usage from stdout, and cleans up', async () => {
   const jsonl = `${JSON.stringify({ type: 'turn.started' })}\n${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 12, output_tokens: 1 } })}\n`;
   const answer = await runOneShotPrompt('codex', 'gpt-6', 'p', { spawn: fakeSpawn(jsonl) });
@@ -63,7 +81,9 @@ test('codex branch reads the -o answer file, parses usage from stdout, and clean
   for (const flag of ['exec', '-s', 'read-only', '--skip-git-repo-check', '--ephemeral', '-C', STATE_DIR]) {
     assert.ok(call.args.includes(flag), `argv missing ${flag}: ${call.args}`);
   }
-  assert.ok(call.args.at(-1) === 'p');
+  assert.equal(call.args.at(-1), '-', 'codex reads the prompt from stdin');
+  assert.ok(!call.args.includes('p'), 'prompt not in argv');
+  assert.equal(call.opts.input, 'p');
   const tmp = call.args[call.args.indexOf('-o') + 1];
   assert.ok(tmp.startsWith(STATE_DIR), 'answer file under STATE_DIR');
   assert.equal(existsSync(tmp), false, 'temp answer file removed');
@@ -75,7 +95,8 @@ test('ollama branch passes prompt and flags through and returns stdout', async (
   const out = await runOneShotPrompt('ollama', 'llama', 'p', { spawn: fakeSpawn('raw answer') });
   assert.equal(out, 'raw answer');
   assert.equal(calls.at(-1).file, OLLAMA_BIN);
-  assert.deepEqual(calls.at(-1).args, ['run', '--hidethinking', '--nowordwrap', 'llama', 'p']);
+  assert.deepEqual(calls.at(-1).args, ['run', '--hidethinking', '--nowordwrap', 'llama']);
+  assert.equal(calls.at(-1).opts.input, 'p');
   const meta = await runOneShotPrompt('ollama', 'llama', 'p', { spawn: fakeSpawn('raw answer'), includeMetadata: true });
   assert.deepEqual(meta, { answer: 'raw answer', usage: null });
 });
@@ -111,7 +132,8 @@ test('default executor routes through the wired Rust backend', async () => {
     assert.deepEqual(JSON.parse(stdout), { result: 'ok', usage: { input_tokens: 1, output_tokens: 2 } });
     assert.equal(seen.at(-1).bin, CLAUDE_BIN);
     assert.equal(seen.at(-1).opts.timeout, 90_000);
-    assert.deepEqual(seen.at(-1).args, ['-p', 'p', '--model', 'haiku', '--output-format', 'json', '--no-session-persistence']);
+    assert.deepEqual(seen.at(-1).args, ['-p', '--model', 'haiku', '--output-format', 'json', '--no-session-persistence']);
+    assert.equal(seen.at(-1).opts.input, 'p');
     await assert.rejects(runOneShotPrompt('claude', 'haiku', 'p', { extraArgs: ['--boom'] }), /claude down/);
   } finally {
     setOneShotBackend(undefined);

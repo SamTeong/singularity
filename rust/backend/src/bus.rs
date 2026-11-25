@@ -28,6 +28,9 @@ pub type BusListener = Arc<dyn Fn(&BusEvent) + Send + Sync>;
 #[derive(Clone, Debug, PartialEq)]
 pub enum BusEvent {
     Output { id: String, data: String },
+    /// Input written to a live agent's pty (`agents.mjs` `input`); internal,
+    /// never forwarded to sockets.
+    Input { id: String, data: String },
     Status { id: String, status: Status },
     List(Vec<AgentWire>),
     Usage(Value),

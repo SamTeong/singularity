@@ -52,8 +52,15 @@ pub struct PromptRunAnswer {
     pub usage: Option<Value>,
 }
 
-/// `execFile(bin, args, { maxBuffer, timeout })` through `oneshot::run`.
-fn exec(bin: &Path, args: &[String], timeout_ms: u64, env: &BTreeMap<String, String>) -> Value {
+/// `execFile(bin, args, { maxBuffer, timeout })` through `oneshot::run`, with
+/// the prompt on stdin (argv would overflow Windows' 32,767-char limit).
+fn exec(
+    bin: &Path,
+    args: &[String],
+    prompt: &str,
+    timeout_ms: u64,
+    env: &BTreeMap<String, String>,
+) -> Value {
     let file = bin.to_str().unwrap_or_default();
     let argv = Value::Array(args.iter().cloned().map(Value::String).collect());
     let env = Value::Object(
@@ -61,12 +68,13 @@ fn exec(bin: &Path, args: &[String], timeout_ms: u64, env: &BTreeMap<String, Str
             .map(|(key, value)| (key.clone(), Value::String(value.clone())))
             .collect::<Map<String, Value>>(),
     );
-    crate::oneshot::run(
+    crate::oneshot::run_with_input(
         Some(file),
         &argv,
         Some(timeout_ms as f64),
         Some(ONESHOT_MAX_BUFFER),
         Some(&env),
+        Some(prompt),
     )
 }
 
@@ -122,11 +130,12 @@ fn temp_id() -> String {
 fn codex_answer(
     bin: &Path,
     args: &[String],
+    prompt: &str,
     tmp: &Path,
     timeout_ms: u64,
     env: &BTreeMap<String, String>,
 ) -> Result<PromptRunAnswer, String> {
-    let out = exec(bin, args, timeout_ms, env);
+    let out = exec(bin, args, prompt, timeout_ms, env);
     if out["ok"] != Value::Bool(true) {
         // Node's execFile rejects before `readFileSync`, so the file is unused.
         return Err(failure_message(bin, args, &out));
@@ -159,7 +168,6 @@ pub(crate) fn run_blocking(
         // dies with "Not logged in".
         let mut args: Vec<String> = vec![
             "-p".to_owned(),
-            prompt.to_owned(),
             "--model".to_owned(),
             model_id.to_owned(),
             "--output-format".to_owned(),
@@ -167,7 +175,7 @@ pub(crate) fn run_blocking(
             "--no-session-persistence".to_owned(),
         ];
         args.extend(opts.extra_args.iter().cloned());
-        let out = exec(&bin, &args, timeout_ms, &deps.env);
+        let out = exec(&bin, &args, prompt, timeout_ms, &deps.env);
         if out["ok"] != Value::Bool(true) {
             // claude puts the real reason in its JSON envelope on stdout;
             // execFile's "Command failed: <argv>" hides it.
@@ -184,9 +192,24 @@ pub(crate) fn run_blocking(
             return Err(reason.unwrap_or_else(|| failure_message(&bin, &args, &out)));
         }
         let stdout = out["stdout"].as_str().unwrap_or_default().to_owned();
-        let usage = serde_json::from_str::<Value>(&stdout)
-            .ok()
-            .and_then(|envelope| envelope.get("usage").cloned());
+        let envelope = serde_json::from_str::<Value>(&stdout).ok();
+        // claude can exit 0 with an error envelope (e.g. a usage limit).
+        if let Some(envelope) = envelope
+            .as_ref()
+            .filter(|envelope| envelope.get("is_error") == Some(&Value::Bool(true)))
+        {
+            let text = |key: &str| {
+                envelope
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.is_empty())
+                    .map(str::to_owned)
+            };
+            return Err(text("result")
+                .or_else(|| text("subtype"))
+                .unwrap_or_else(|| "claude one-shot failed".to_owned()));
+        }
+        let usage = envelope.and_then(|envelope| envelope.get("usage").cloned());
         return Ok(PromptRunAnswer {
             answer: stdout,
             usage,
@@ -212,9 +235,9 @@ pub(crate) fn run_blocking(
             tmp.to_string_lossy().into_owned(),
         ];
         args.extend(opts.extra_args.iter().cloned());
-        args.push(prompt.to_owned());
+        args.push("-".to_owned()); // read the prompt from stdin
         // Node's `finally`: best-effort cleanup on every path.
-        let result = codex_answer(&bin, &args, &tmp, timeout_ms, &deps.env);
+        let result = codex_answer(&bin, &args, prompt, &tmp, timeout_ms, &deps.env);
         let _ = std::fs::remove_file(&tmp);
         return result;
     }
@@ -226,9 +249,8 @@ pub(crate) fn run_blocking(
         "--hidethinking".to_owned(),
         "--nowordwrap".to_owned(),
         model_id.to_owned(),
-        prompt.to_owned(),
     ];
-    let out = exec(&bin, &args, timeout_ms, &deps.env);
+    let out = exec(&bin, &args, prompt, timeout_ms, &deps.env);
     if out["ok"] != Value::Bool(true) {
         return Err(failure_message(&bin, &args, &out));
     }
@@ -399,6 +421,14 @@ mod tests {
             .replace('"', "")
     }
 
+    /// What the fake bin read from stdin (`more` / `cat` into `<args>.stdin`).
+    fn recorded_stdin(scratch: &Scratch) -> String {
+        fs::read_to_string(scratch.path("args.txt.stdin"))
+            .unwrap_or_default()
+            .trim()
+            .to_owned()
+    }
+
     const CLAUDE_ENVELOPE: &str =
         r#"{"result":"answer text","usage":{"input_tokens":3,"output_tokens":5}}"#;
 
@@ -408,8 +438,10 @@ mod tests {
         let claude = scratch.bin(
             "fake-claude",
             "echo %* > \"%ONESHOT_ARGS_FILE%\"\n\
+             more > \"%ONESHOT_ARGS_FILE%.stdin\"\n\
              echo {\"result\":\"answer text\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5}}\n",
             "printf '%s' \"$*\" > \"$ONESHOT_ARGS_FILE\"\n\
+             cat > \"$ONESHOT_ARGS_FILE.stdin\"\n\
              echo '{\"result\":\"answer text\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5}}'\n",
         );
         let deps = deps(
@@ -428,10 +460,12 @@ mod tests {
         ))
         .unwrap();
         assert_eq!(out.trim_end(), CLAUDE_ENVELOPE);
+        // The prompt rides stdin, never argv.
         assert_eq!(
             recorded_args(&scratch),
-            "-p summarise day --model haiku --output-format json --no-session-persistence"
+            "-p --model haiku --output-format json --no-session-persistence"
         );
+        assert_eq!(recorded_stdin(&scratch), "summarise day");
 
         let meta = block_on(run_prompt_with_metadata(
             &deps,
@@ -461,8 +495,53 @@ mod tests {
         .unwrap();
         assert_eq!(
             recorded_args(&scratch),
-            "-p p --model haiku --output-format json --no-session-persistence --boom"
+            "-p --model haiku --output-format json --no-session-persistence --boom"
         );
+    }
+
+    #[test]
+    fn claude_branch_rejects_an_is_error_envelope_on_exit_zero() {
+        let scratch = Scratch::new("claude-is-error");
+        let claude = scratch.bin(
+            "fake-claude-is-error",
+            "echo {\"is_error\":true,\"subtype\":\"success\",\"result\":\"usage limit reached\"}\n",
+            "echo '{\"is_error\":true,\"subtype\":\"success\",\"result\":\"usage limit reached\"}'\n",
+        );
+        let deps = deps(
+            &scratch,
+            &claude,
+            &scratch.path("unused-ollama"),
+            &scratch.path("unused-codex"),
+        );
+        let error = block_on(run_prompt(
+            &deps,
+            "claude",
+            "haiku",
+            "p",
+            PromptRunOpts::default(),
+        ))
+        .unwrap_err();
+        assert_eq!(error, "usage limit reached");
+
+        // No result text: the subtype is the reason.
+        let bare = scratch.bin(
+            "fake-claude-is-error-bare",
+            "echo {\"is_error\":true,\"subtype\":\"error_max_turns\"}\n",
+            "echo '{\"is_error\":true,\"subtype\":\"error_max_turns\"}'\n",
+        );
+        let deps = PromptRunDeps {
+            claude_bin: Some(bare),
+            ..deps
+        };
+        let error = block_on(run_prompt(
+            &deps,
+            "claude",
+            "haiku",
+            "p",
+            PromptRunOpts::default(),
+        ))
+        .unwrap_err();
+        assert_eq!(error, "error_max_turns");
     }
 
     #[test]
@@ -556,7 +635,7 @@ mod tests {
         assert_eq!(tokens[9], "-o");
         let tmp = tokens[10];
         assert!(tmp.starts_with(&*scratch.dir.to_string_lossy()));
-        assert_eq!(tokens.last(), Some(&"p"));
+        assert_eq!(tokens.last(), Some(&"-"), "prompt read from stdin");
         assert!(!Path::new(tmp).exists(), "temp answer file removed");
 
         let meta = block_on(run_prompt_with_metadata(
@@ -600,7 +679,7 @@ mod tests {
         assert_eq!(out.trim_end(), "raw answer");
         assert_eq!(
             recorded_args(&scratch),
-            "run --hidethinking --nowordwrap llama p"
+            "run --hidethinking --nowordwrap llama"
         );
 
         let meta = block_on(run_prompt_with_metadata(

@@ -198,7 +198,12 @@ test('registry activates early output after registration and contains async adap
     assert.equal(getStatus(id), 'running');
     assert.deepEqual(outputs, [{ id, data: 'EARLY' }]);
 
+    const inputs = [];
+    const onInput = (event) => inputs.push(event);
+    bus.on('input', onInput);
     input(id, 'later');
+    bus.off('input', onInput);
+    assert.deepEqual(inputs, [{ id, data: 'later' }], 'written input is announced on the bus');
     resize(id, 100, 40);
     kill(id);
     await new Promise((resolve) => setImmediate(resolve));

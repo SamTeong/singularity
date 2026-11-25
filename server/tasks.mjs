@@ -27,13 +27,70 @@ const STATES = {
   inreview: ['reviewing', 'parked — needs human', 'parked — merge conflict', 'awaiting human merge', 'awaiting human review', 'stopped — budget'],
   done: ['complete', 'report ready'],
 };
-const OVERLAY_STATES = ['rate-limited'];
+// usage-limited = Claude plan limit; rate-limited = a plain 429.
+const OVERLAY_STATES = ['usage-limited', 'rate-limited'];
 // Same var index.mjs listens on — the prompts below embed it in the status-curl
 // URL every task agent posts to, so a mismatch here is a silent NaN port.
 const PORT = Number(process.env.DAEMON_PORT);
 const MAX_REVIEW_REJECTS = 3;
 const RETENTION_MS = 7 * 24 * 3600 * 1000; // Done cards auto-conclude to history after this long.
-export const RATE_LIMIT_RE = /reached your session usage limit|Request rejected \(429\)/;
+export const USAGE_LIMIT_RE = /reached your session usage limit/;
+export const RATE_LIMIT_RE = /Request rejected \(429\)/;
+const RATE_LIMIT_TAIL_CHARS = 400;
+// Escape sequences (CSI, OSC, other ESC forms) and C0 controls except \t \n \r.
+const ANSI_RE = new RegExp([
+  '\\x1b\\[[0-?]*[ -/]*[@-~]',
+  '\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)',
+  '\\x1b[ -/]*[0-~]',
+  '[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]',
+].join('|'), 'g');
+// TUI repaints are mostly escapes; match limit phrases on the visible text.
+export function stripAnsi(s) { return s.replace(ANSI_RE, ''); }
+
+// Overlay for a rolling output tail. The plan-limit phrase wins: Claude's
+// usage-limit error arrives as a 429 carrying it.
+export function classifyLimit(tail) {
+  if (USAGE_LIMIT_RE.test(tail)) return 'usage-limited';
+  if (RATE_LIMIT_RE.test(tail)) return 'rate-limited';
+  return null;
+}
+
+const RESET_RE = /\bresets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([^)]+)\))?/i;
+
+// Wall clock of `tz` at `at` read as UTC, minus `at`: the zone's offset.
+function zoneOffsetMs(tz, at) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+  }).formatToParts(at).map((p) => [p.type, p.value]));
+  return Date.UTC(+parts.year, parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second) - Math.floor(at / 1000) * 1000;
+}
+
+// Best-effort epoch ms of the limit reset named in the tail ("resets 3pm",
+// "reset at 3:30pm (Europe/Zurich)", "resets 15:00"): the next such wall-clock
+// time after `now`, in the named zone or the host zone. Unparsable -> null.
+export function parseLimitResetAt(tail, now = Date.now()) {
+  const m = RESET_RE.exec(tail);
+  if (!m || (!m[2] && !m[3])) return null;
+  let hour = Number(m[1]);
+  const minute = Number(m[2] ?? 0);
+  const meridiem = m[3]?.toLowerCase();
+  if (minute > 59) return null;
+  if (meridiem) {
+    if (hour < 1 || hour > 12) return null;
+    hour = (hour % 12) + (meridiem === 'pm' ? 12 : 0);
+  } else if (hour > 23) return null;
+  const tz = m[4]?.trim() || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  try {
+    const today = new Date(now + zoneOffsetMs(tz, now));
+    for (let day = 0; day <= 1; day += 1) {
+      const wall = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + day, hour, minute);
+      const at = wall - zoneOffsetMs(tz, wall - zoneOffsetMs(tz, wall));
+      if (at > now) return at;
+    }
+  } catch { /* unknown zone */ }
+  return null;
+}
 
 const tasks = new Map(); // id -> task record (plain object, see plan/data model)
 const taskBySession = new Map(); // sessionId -> taskId: reverse index so the output-listener rate-limit scan is O(1), not a linear find over all tasks per PTY chunk. Set where a task's sessionId is assigned (createTask), dropped where the session leaves the board for good (done-transition, conclude).
@@ -43,6 +100,7 @@ let logger = null;
 // Cleared wherever a task's session leaves the board for good (done-transition,
 // conclude) so this never grows across a daemon's lifetime.
 const tails = new Map();
+const limitTimers = new Map(); // taskId -> timeout clearing its usage limit at limitResetAt
 
 let gitBackend = null;
 // Hard timeout + non-interactive flags on every git call: this runs on the
@@ -159,18 +217,73 @@ export function initTasks(log) {
     if (t.column === 'done') serialized(() => finishDoneTask(t)).catch((e) => log?.warn({ err: e.message, id: t.id }, 'done-task recovery failed'));
     else if (t.kind === 'git' && !existsSync(t.worktree)) serialized(() => ensureWorktree(t)).catch((e) => log?.warn({ err: e.message, id: t.id }, 'worktree recovery failed'));
   }
+  for (const t of tasks.values()) syncLimitTimer(t); // persisted usage limits clear at their reset
   sweepRetention();
   setInterval(sweepRetention, 3600_000).unref();
-  // Ollama 429s surface only in the pty stream — flag the card so it doesn't
-  // sit looking idle. Rolling tail absorbs chunk splits.
+  // Usage limits and Ollama 429s surface only in the pty stream — flag the card
+  // so it doesn't sit looking idle. Rolling tail (ANSI-stripped) absorbs chunk
+  // splits. Output only ever enters an overlay: Claude's TUI repaints while it
+  // waits, so a tail without the phrase proves nothing. Input or the reset
+  // timer clears it.
   reg.bus.on('output', async ({ id, data }) => {
     const tid = taskBySession.get(id);
     const t = tid ? tasks.get(tid) : null;
-    if (!t || t.column === 'done' || t.state === 'rate-limited') return;
-    const tail = ((tails.get(id) || '') + data).slice(-400);
+    if (!t || t.column === 'done') return;
+    const tail = ((tails.get(id) || '') + stripAnsi(data)).slice(-RATE_LIMIT_TAIL_CHARS);
     tails.set(id, tail);
-    if (RATE_LIMIT_RE.test(tail)) await updateTask(t.id, { state: 'rate-limited' }).catch((e) => logger?.warn({ err: e.message, id }, 'rate-limit update failed'));
+    const kind = classifyLimit(tail);
+    if (!kind || OVERLAY_STATES.includes(t.state)) return;
+    await serialized(() => updateTaskInner(t.id, { state: kind }, { limitResetAt: parseLimitResetAt(tail) }))
+      .catch((e) => logger?.warn({ err: e.message, id }, 'rate-limit update failed'));
   });
+  // Input to a limited session is a resume attempt: clear the overlay and drop
+  // the stale tail. If the limit still holds, Claude reprints the phrase and
+  // the output watcher re-flags. Escape-only input (focus/mouse reports, arrow
+  // keys) is not a resume.
+  reg.bus.on('input', async ({ id, data }) => {
+    const tid = taskBySession.get(id);
+    const t = tid ? tasks.get(tid) : null;
+    if (!t || !OVERLAY_STATES.includes(t.state) || !stripAnsi(String(data))) return;
+    tails.delete(id);
+    await serialized(() => clearLimitInner(t.id)).catch((e) => logger?.warn({ err: e.message, id }, 'limit clear failed'));
+  });
+}
+
+// Keep one timer per usage-limited task, firing at its limitResetAt; any other
+// state (cleared, re-set, concluded) cancels it. Delays past setTimeout's
+// 32-bit cap re-arm on fire instead of clearing early.
+function syncLimitTimer(t) {
+  clearTimeout(limitTimers.get(t.id));
+  limitTimers.delete(t.id);
+  if (t.state !== 'usage-limited' || t.limitResetAt == null) return;
+  const at = t.limitResetAt;
+  limitTimers.set(t.id, setTimeout(() => {
+    limitTimers.delete(t.id);
+    const cur = tasks.get(t.id);
+    if (!cur || cur.state !== 'usage-limited' || cur.limitResetAt !== at) return;
+    if (Date.now() < at) return syncLimitTimer(cur);
+    if (cur.sessionId) tails.delete(cur.sessionId);
+    serialized(() => clearLimitInner(cur.id)).catch((e) => logger?.warn({ err: e.message, id: cur.id }, 'limit clear failed'));
+  }, Math.min(Math.max(0, at - Date.now()), 2 ** 31 - 1)).unref());
+}
+
+// Drop a limit overlay: restore the state it covered (the column's first state
+// when a column move made that one invalid) and drop the limit fields. A
+// state-only update, so no transition record. No-op when not limited.
+function clearLimitInner(id) {
+  const t = tasks.get(id);
+  if (!t || !OVERLAY_STATES.includes(t.state)) return t;
+  const { limitPrevState, limitResetAt, ...next } = t;
+  const allowed = STATES[next.column] ?? [];
+  next.state = allowed.includes(limitPrevState) ? limitPrevState : (allowed[0] ?? limitPrevState ?? t.state);
+  next.updatedAt = Date.now();
+  const staged = new Map(tasks);
+  staged.set(id, next);
+  persist(staged);
+  tasks.set(id, next);
+  syncLimitTimer(next);
+  emitTasks();
+  return next;
 }
 
 export function snapshotTasks() { return { tasks: [...tasks.values()], history }; }
@@ -499,7 +612,8 @@ export function updateTask(id, body) {
   return serialized(() => updateTaskInner(id, body));
 }
 
-async function updateTaskInner(id, { column, state, actor, source, reason }) {
+// `limitResetAt` is internal (the output watcher's parsed reset), never body.
+async function updateTaskInner(id, { column, state, actor, source, reason }, { limitResetAt = null } = {}) {
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
   const next = { ...t };
@@ -529,6 +643,15 @@ async function updateTaskInner(id, { column, state, actor, source, reason }) {
     const s = String(state).slice(0, 120);
     const allowed = [...(STATES[col] ?? []), ...OVERLAY_STATES];
     if (!allowed.includes(s)) throw new Error(`bad state for ${col} (expected ${allowed.join('|')})`);
+    // Entering a limit overlay remembers the state it covers; any real state
+    // ends the overlay and its limit fields.
+    if (!OVERLAY_STATES.includes(s)) {
+      delete next.limitPrevState;
+      delete next.limitResetAt;
+    } else if (!OVERLAY_STATES.includes(t.state)) {
+      next.limitPrevState = t.state;
+      if (s === 'usage-limited' && limitResetAt != null) next.limitResetAt = limitResetAt;
+    }
     next.state = s;
   }
   next.updatedAt = Date.now();
@@ -537,6 +660,7 @@ async function updateTaskInner(id, { column, state, actor, source, reason }) {
   // Make the transition durable before its irreversible process/worktree work.
   persist(staged);
   tasks.set(id, next);
+  syncLimitTimer(next);
   emitTasks();
   if (column === 'done' && !wasDone) await finishDoneTask(next);
   else if (column !== undefined && column !== 'done' && wasDone) await ensureWorktree(next);
@@ -590,6 +714,7 @@ async function concludeTaskInner(id, outcome) {
   await cleanupGitTask(t);
   if (t.sessionId) taskBySession.delete(t.sessionId);
   tasks.delete(id);
+  syncLimitTimer({ id }); // concluded: cancel a pending reset timer
   history.push({ ...t, outcome, concludedAt: Date.now(), finalStats });
   persist();
   emitTasks();
@@ -606,8 +731,15 @@ export function deleteHistory(id) {
 // Done cards older than RETENTION_MS auto-conclude ('completed') so the board
 // doesn't accumulate stale cards forever; the history entry keeps the record.
 async function sweepRetention() {
-  const cutoff = Date.now() - RETENTION_MS;
+  const now = Date.now();
+  const cutoff = now - RETENTION_MS;
   for (const t of [...tasks.values()]) {
+    // Backstop for the reset timer: a usage limit past its parsed reset
+    // clears; its stale tail goes too, so the old phrase can't re-flag the card.
+    if (t.state === 'usage-limited' && t.limitResetAt != null && now >= t.limitResetAt) {
+      if (t.sessionId) tails.delete(t.sessionId);
+      await serialized(() => clearLimitInner(t.id)).catch((e) => logger?.warn({ err: e.message, id: t.id }, 'limit clear failed'));
+    }
     if (t.column === 'done' && t.doneAt && t.doneAt < cutoff) {
       try { await concludeTask(t.id, 'completed'); }
       catch (e) { logger?.warn({ err: e.message, id: t.id }, 'retention sweep: conclude failed'); }
