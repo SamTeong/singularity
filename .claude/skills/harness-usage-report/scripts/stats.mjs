@@ -545,8 +545,15 @@ const PRICE_ABOVE = {};
 // $/MTok in PRICE_ABOVE under its key (pricing.json `above_200k`). Applied per
 // API call, never on summed session tokens (cache_read accumulates across turns
 // and would spuriously trip it).
-let LONG_CTX_THRESHOLD = 200000;
+let LONG_CTX_THRESHOLD;
 let DEFAULT_KEY = "";
+const FIXED_OPENAI_LONG_CONTEXT_KEYS = new Set([
+  "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna",
+]);
+const DEFAULT_OPENAI_LONG_CONTEXT_KEYS = new Set([
+  "gpt-6.2-astra", "gpt-6.2-sol", "gpt-6-astra",
+  "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+]);
 
 function _is_rate(a) {
   return Array.isArray(a) && a.length === 4 && a.every((x) => typeof x === "number" && Number.isFinite(x));
@@ -609,14 +616,10 @@ export function _msg_cost_tiered(model, i, o, cr, cc) {
   const key = _price_key(model);
   if (key === null) return null;
   const above = PRICE_ABOVE[key];
-  // Sol/Luna's long-context surcharge begins above 272k input tokens, and
-  // haiku-5-5's above 100k — not the global threshold; model-specific quirks,
-  // not part of the pricing.json schema (which carries one global
-  // long_context_threshold).
-  const threshold =
-    key === "gpt-6-sol" || key === "gpt-6-luna" || key === "gpt-6.1-sol" || key === "gpt-6.1-terra" ? 272000
+  // Preserve the existing fixed boundaries and explicitly configured global threshold.
+  const threshold = FIXED_OPENAI_LONG_CONTEXT_KEYS.has(key) ? 272000
     : key === "haiku-5-5" ? 100000
-    : LONG_CTX_THRESHOLD;
+    : LONG_CTX_THRESHOLD ?? (DEFAULT_OPENAI_LONG_CONTEXT_KEYS.has(key) ? 272000 : 200000);
   if (above && i + cr + cc > threshold) {
     return (i * above[0] + o * above[1] + cr * above[2] + cc * above[3]) / 1e6;
   }

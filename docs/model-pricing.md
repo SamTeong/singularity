@@ -4,6 +4,10 @@
 2026-11-19 for Astra, Sol, Terra, Luna, Fable, Opus, Sonnet and Haiku. Rates are
 USD per million tokens, ordered `[input, output, cache_read, cache_write]`.
 Historical entries reprice old transcripts; they do not imply API availability.
+The GPT-5.6 Sol entries use promotional rates. OpenAI lists November 30,
+2026 as the promotion end date. Recheck the published rates before updating
+the catalog and estimators for requests after the promotion.
+[GPT-5.6 Sol pricing](https://developers.openai.com/api/docs/models/gpt-5.6-sol)
 Haiku 3.5's historical rates are retained from the archived pricing record in
 `~/wiki/agentic-coding/building/model-pricing.md`; the old documentation URL now
 redirects to the current page.
@@ -31,8 +35,11 @@ breakdowns when present. Billed cost takes precedence where supplied.
 OpenAI long pricing applies above 272,000 prompt tokens; Haiku 5.5 switches above
 100,000. Cached input and cache creation count toward the prompt boundary, and
 the selected tier prices the entire request. The legacy `above_200k` field name
-does not set either boundary. Version matching rejects partial numeric segments
-so a dated Fable 5 ID does not resolve to Fable 5.2.
+does not set either boundary. For known OpenAI long-context models, a table
+without `long_context_threshold` defaults to 272,000. Existing custom global
+thresholds still apply to entries that used that setting. Version matching
+rejects partial numeric segments so a dated Fable 5 ID does not resolve to Fable
+5.2.
 
 Reports use the synced tier data from the live `pricing.json`, including any
 `above_200k` entries. A table without one applies base rates and the report does

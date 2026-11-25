@@ -97,3 +97,20 @@ test('embedded session estimator agrees with current and historical Claude rate 
     assert.ok(Math.abs((await parseByPath(target)).estCostUsd - expected) < 1e-12);
   }
 });
+
+test('known models retain their request thresholds when the pricing table omits a global threshold', async () => {
+  const { long_context_threshold, ...pricing } = reconcilePricing({
+    base: { 'gpt-custom': [1, 2, 3, 4] },
+    above_200k: { 'gpt-custom': [2, 3, 4, 5] },
+  });
+  assert.equal(long_context_threshold, 272000);
+  await writeFile(join(scratch, 'pricing.json'), JSON.stringify(pricing));
+  const report = await import('../.claude/skills/harness-usage-report/scripts/stats.mjs?default-threshold');
+  for (const [key, long] of Object.entries(catalog.pricing.above_200k)) {
+    const threshold = key === 'haiku-5-5' ? 100000 : 272000;
+    const base = catalog.pricing.base[key];
+    assert.equal(report._msg_cost_tiered(key, threshold, 0, 0, 0), threshold * base[0] / 1e6, key);
+    assert.equal(report._msg_cost_tiered(key, threshold + 1, 0, 0, 0), (threshold + 1) * long[0] / 1e6, key);
+  }
+  assert.equal(report._msg_cost_tiered('gpt-custom', 200001, 0, 0, 0), 200001 * 2 / 1e6);
+});
