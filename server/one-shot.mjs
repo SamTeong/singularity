@@ -34,32 +34,37 @@ export async function oneShotSpawn(bin, args, opts = {}) {
 }
 
 // execFile leaves stdin an open pipe, so every CLI here stalls waiting on input
-// ("Warning: no stdin data received in 3s, proceeding without"). Close it.
+// ("Warning: no stdin data received in 3s, proceeding without"). Write the
+// prompt (opts.input) and close it.
 function run(spawn, bin, args, opts) {
   const p = spawn(bin, args, opts);
-  p.child?.stdin?.end();
+  p.child?.stdin?.end(opts.input);
   return p;
 }
 
+// The prompt rides stdin, not argv: system + guidance + a 48K-char digest
+// overflows Windows' 32,767-char CreateProcess command line.
 export async function runOneShotPrompt(group, modelId, prompt, {
   timeoutMs = ONESHOT_TIMEOUT_MS, extraArgs = [], spawn = oneShotSpawn, includeMetadata = false,
 } = {}) {
-  const opts = { maxBuffer: ONESHOT_MAX_BUFFER, timeout: timeoutMs };
+  const opts = { maxBuffer: ONESHOT_MAX_BUFFER, timeout: timeoutMs, input: prompt };
   if (group === 'claude') {
     // No --bare: it skips the credential plumbing along with hooks/LSP/plugins,
     // so every headless call dies with "Not logged in · Please run /login".
     try {
       const { stdout } = await run(spawn, CLAUDE_BIN, [
-        '-p', prompt,
+        '-p',
         '--model', modelId,
         '--output-format', 'json',
         '--no-session-persistence',
         ...extraArgs,
       ], opts);
+      let envelope = null;
+      try { envelope = JSON.parse(stdout); } catch { /* not JSON */ }
+      // claude can exit 0 with an error envelope (e.g. a usage limit).
+      if (envelope?.is_error === true) throw new Error(envelope.result || envelope.subtype || 'claude one-shot failed');
       if (!includeMetadata) return stdout;
-      let usage = null;
-      try { usage = JSON.parse(stdout)?.usage ?? null; } catch { /* not JSON */ }
-      return { answer: stdout, usage };
+      return { answer: stdout, usage: envelope?.usage ?? null };
     } catch (e) {
       // claude puts the real reason in its JSON envelope on stdout; execFile's
       // "Command failed: <argv>" message hides it.
@@ -80,7 +85,7 @@ export async function runOneShotPrompt(group, modelId, prompt, {
         '-C', STATE_DIR,
         '-o', tmpFile,
         ...extraArgs,
-        prompt,
+        '-', // read the prompt from stdin
       ], opts);
       const answer = readFileSync(tmpFile, 'utf8');
       if (!includeMetadata) return answer;
@@ -100,7 +105,7 @@ export async function runOneShotPrompt(group, modelId, prompt, {
   if (group === 'ollama') {
     // Without these, stdout carries a "Thinking..." block (drafts with stray
     // JSON) and terminal wrap escapes (ESC[nD ESC[K) that corrupt the answer.
-    const { stdout } = await run(spawn, OLLAMA_BIN, ['run', '--hidethinking', '--nowordwrap', modelId, prompt], opts);
+    const { stdout } = await run(spawn, OLLAMA_BIN, ['run', '--hidethinking', '--nowordwrap', modelId], opts);
     return includeMetadata ? { answer: stdout, usage: null } : stdout;
   }
   throw new Error(`one-shot: unknown group '${group}'`);

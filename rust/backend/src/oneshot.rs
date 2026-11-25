@@ -91,7 +91,20 @@ pub fn run(
     max_buffer: Option<f64>,
     env: Option<&Value>,
 ) -> Value {
-    run_inner(bin, args, timeout_ms, max_buffer, env, false, false)
+    run_inner(bin, args, timeout_ms, max_buffer, env, None, false, false)
+}
+
+/// `run`, but `input` (when `Some`) is written to the child's stdin and the
+/// pipe is closed; `None` keeps `run`'s immediate EOF.
+pub fn run_with_input(
+    bin: Option<&str>,
+    args: &Value,
+    timeout_ms: Option<f64>,
+    max_buffer: Option<f64>,
+    env: Option<&Value>,
+    input: Option<&str>,
+) -> Value {
+    run_inner(bin, args, timeout_ms, max_buffer, env, input, false, false)
 }
 
 pub fn run_git(
@@ -101,15 +114,17 @@ pub fn run_git(
     max_buffer: Option<f64>,
     env: Option<&Value>,
 ) -> Value {
-    run_inner(bin, args, timeout_ms, max_buffer, env, true, true)
+    run_inner(bin, args, timeout_ms, max_buffer, env, None, true, true)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_inner(
     bin: Option<&str>,
     args: &Value,
     timeout_ms: Option<f64>,
     max_buffer: Option<f64>,
     env: Option<&Value>,
+    input: Option<&str>,
     keep_stdin_open: bool,
     cap_stderr: bool,
 ) -> Value {
@@ -134,7 +149,7 @@ fn run_inner(
 
     let mut cmd = Command::new(bin);
     cmd.args(argv)
-        .stdin(if keep_stdin_open {
+        .stdin(if keep_stdin_open || input.is_some() {
             Stdio::piped()
         } else {
             Stdio::null()
@@ -164,6 +179,18 @@ fn run_inner(
             };
         }
     };
+
+    // Feed stdin from its own thread so a child that fills stdout before
+    // draining stdin cannot deadlock; dropping the pipe closes it (EOF).
+    if let Some(input) = input {
+        if let Some(mut pipe) = child.stdin.take() {
+            let bytes = input.as_bytes().to_vec();
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let _ = pipe.write_all(&bytes);
+            });
+        }
+    }
 
     let (tx, rx) = mpsc::channel();
     if let Some(pipe) = child.stdout.take() {
@@ -431,6 +458,25 @@ mod tests {
         let out = run(Some(bin), &args, Some(10_000.0), Some(4.0), None);
         assert_eq!(out["ok"], false);
         assert_eq!(out["error"], "stdout maxBuffer exceeded");
+    }
+
+    #[test]
+    fn input_reaches_the_child_stdin_then_eof() {
+        // `more`/`cat` echo stdin and exit only once it is closed.
+        #[cfg(windows)]
+        let (bin, args) = ("cmd", json!(["/C", "more"]));
+        #[cfg(not(windows))]
+        let (bin, args) = ("cat", json!([]));
+        let out = run_with_input(
+            Some(bin),
+            &args,
+            Some(10_000.0),
+            None,
+            None,
+            Some("stdin-prompt-ok"),
+        );
+        assert_eq!(out["ok"], true, "expected success, got {out}");
+        assert!(out["stdout"].as_str().unwrap().contains("stdin-prompt-ok"));
     }
 
     #[test]

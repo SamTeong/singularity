@@ -41,7 +41,7 @@ after(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = taskModule;
+const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, classifyLimit, parseLimitResetAt, cleanupGitTask, ensureWorktree } = taskModule;
 const reg = await import('./agents.mjs');
 
 // Built once; each test copies it (git spawns are the cost on Windows).
@@ -237,12 +237,121 @@ test('every prompt builder embeds the daemon port in the status-curl URL', async
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('RATE_LIMIT_RE matches 429 + usage-limit strings', async () => {
-  assert.match('API Error: Request rejected (429) · you (x) have reached your session usage limit', RATE_LIMIT_RE);
-  assert.match('reached your session usage limit', RATE_LIMIT_RE);
+test('classifyLimit splits the Claude usage limit from a plain 429', async () => {
+  assert.equal(classifyLimit('API Error: Request rejected (429) · you (x) have reached your session usage limit'), 'usage-limited');
+  assert.equal(classifyLimit('reached your session usage limit'), 'usage-limited');
+  assert.equal(classifyLimit('Request rejected (429)'), 'rate-limited');
   assert.match('Request rejected (429)', RATE_LIMIT_RE);
-  assert.doesNotMatch('session usage limit', RATE_LIMIT_RE);
-  assert.doesNotMatch('HTTP 429', RATE_LIMIT_RE);
+  assert.doesNotMatch('reached your session usage limit', RATE_LIMIT_RE);
+  assert.equal(classifyLimit('session usage limit'), null);
+  assert.equal(classifyLimit('HTTP 429'), null);
+});
+
+test('parseLimitResetAt reads the reset wall clock, best-effort', async () => {
+  const now = Date.UTC(2026, 0, 10, 10, 0);
+  assert.equal(parseLimitResetAt('limit · resets 3pm (UTC)', now), Date.UTC(2026, 0, 10, 15, 0));
+  assert.equal(parseLimitResetAt('resets 15:00 (UTC)', now), Date.UTC(2026, 0, 10, 15, 0));
+  // 17:00 in Zurich (UTC+1 in January): 3:30pm has passed, so tomorrow's.
+  assert.equal(parseLimitResetAt('reset at 3:30pm (Europe/Zurich)', Date.UTC(2026, 0, 10, 16, 0)), Date.UTC(2026, 0, 11, 14, 30));
+  const local = new Date(2026, 0, 10, 9, 0).getTime();
+  assert.equal(parseLimitResetAt('resets 3pm', local), new Date(2026, 0, 10, 15, 0).getTime());
+  for (const tail of ['resets soon', 'resets 3 times', 'resets 13pm', 'resets 3pm (Not/AZone)', 'no reset here']) {
+    assert.equal(parseLimitResetAt(tail, now), null, tail);
+  }
+});
+
+async function waitForTask(id, predicate, ms = 3000) {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 20))) {
+    const t = snapshotTasks().tasks.find((x) => x.id === id);
+    if (t && predicate(t)) return t;
+  }
+  return snapshotTasks().tasks.find((x) => x.id === id);
+}
+
+test('limit overlay: entered from ANSI-stripped output, never cleared by output, cleared by input, re-flagged by the phrase', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [
+      { id: 'lim-1', title: 'seed', description: 'd', column: 'inprogress', state: 'implementing', kind: 'plain', repo: '/r', sessionId: 'lim-sess-1' },
+      { id: 'lim-2', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r', sessionId: 'lim-sess-2' },
+    ],
+    history: [],
+  }));
+  initTasks(null);
+  const stateOf = (id) => snapshotTasks().tasks.find((x) => x.id === id).state;
+  const pause = () => new Promise((r) => setTimeout(r, 100));
+
+  reg.bus.emit('output', { id: 'lim-sess-1', data: '\x1b[31mreached your \x1b[1msession usage limit\x1b[0m · resets 3pm (UTC)' });
+  let t = await waitForTask('lim-1', (x) => x.state === 'usage-limited');
+  assert.equal(t.state, 'usage-limited');
+  assert.equal(t.limitPrevState, 'implementing');
+  assert.ok(Number.isFinite(t.limitResetAt) && t.limitResetAt > Date.now());
+
+  // A TUI repaint: well over 400 bytes (and 400 visible chars), none of it the phrase.
+  const repaint = `\x1b[2K\x1b[1G\x1b[38;5;246m${'─'.repeat(20)}\x1b[0m\r\n`.repeat(30);
+  assert.ok(repaint.length > 400);
+  reg.bus.emit('output', { id: 'lim-sess-1', data: repaint });
+  await pause();
+  assert.equal(stateOf('lim-1'), 'usage-limited', 'repaint output does not clear');
+
+  reg.bus.emit('output', { id: 'lim-sess-1', data: 'reached your session usage limit' }); // back in the tail
+
+  reg.bus.emit('input', { id: 'lim-sess-1', data: '\x1b[I' });
+  await pause();
+  assert.equal(stateOf('lim-1'), 'usage-limited', 'a focus report is not a resume');
+
+  reg.bus.emit('input', { id: 'lim-sess-1', data: '\r' });
+  t = await waitForTask('lim-1', (x) => x.state === 'implementing');
+  assert.equal(t.state, 'implementing');
+  assert.equal('limitPrevState' in t, false);
+  assert.equal('limitResetAt' in t, false);
+  assert.deepEqual(t.transitions, [], 'clearing adds no transition');
+
+  reg.bus.emit('output', { id: 'lim-sess-1', data: ' ' });
+  await pause();
+  assert.equal(stateOf('lim-1'), 'implementing', 'the stale phrase was dropped with the tail');
+
+  reg.bus.emit('output', { id: 'lim-sess-1', data: 'reached your session usage limit' });
+  t = await waitForTask('lim-1', (x) => x.state === 'usage-limited');
+  assert.equal(t.state, 'usage-limited', 'the phrase reappearing after input re-flags');
+
+  reg.bus.emit('output', { id: 'lim-sess-2', data: 'API Error: Request rejected (429)' });
+  t = await waitForTask('lim-2', (x) => x.state === 'rate-limited');
+  assert.equal(t.state, 'rate-limited');
+  assert.equal(t.limitPrevState, 'working');
+  assert.equal('limitResetAt' in t, false);
+});
+
+test('limit overlay: the retention loop clears a usage limit past its reset', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [
+      { id: 'lim-due', title: 'seed', description: 'd', column: 'inprogress', state: 'usage-limited', limitPrevState: 'fixing', limitResetAt: Date.now() - 1000, kind: 'plain', repo: '/r', transitions: [] },
+      { id: 'lim-later', title: 'seed', description: 'd', column: 'inprogress', state: 'usage-limited', limitPrevState: 'fixing', limitResetAt: Date.now() + 3600_000, kind: 'plain', repo: '/r', transitions: [] },
+    ],
+    history: [],
+  }));
+  initTasks(null);
+  const t = await waitForTask('lim-due', (x) => x.state === 'fixing');
+  assert.equal(t.state, 'fixing');
+  assert.equal('limitResetAt' in t, false);
+  assert.deepEqual(t.transitions, []);
+  assert.equal(snapshotTasks().tasks.find((x) => x.id === 'lim-later').state, 'usage-limited');
+});
+
+test('limit overlay: a persisted usage limit clears at its reset time, not before', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'lim-timer', title: 'seed', description: 'd', column: 'inprogress', state: 'usage-limited', limitPrevState: 'fixing', limitResetAt: Date.now() + 400, kind: 'plain', repo: '/r', transitions: [] }],
+    history: [],
+  }));
+  initTasks(null);
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(snapshotTasks().tasks.find((x) => x.id === 'lim-timer').state, 'usage-limited', 'not before the reset');
+  const t = await waitForTask('lim-timer', (x) => x.state === 'fixing');
+  assert.equal(t.state, 'fixing');
+  assert.equal('limitResetAt' in t, false);
+  assert.deepEqual(t.transitions, []);
 });
 
 // updateTask validates `state` against the per-column STATES map. Seeded
@@ -573,11 +682,11 @@ test('initTasks: rebuilds taskBySession reverse index from tasks.json for rate-l
   let stateAfterOutput = null;
   let sawTasks;
   const emitted = new Promise((resolve) => { sawTasks = resolve; });
-  reg.bus.once('tasks', () => { stateAfterOutput = snapshotTasks().tasks[0]?.state; sawTasks(); });
+  reg.bus.once('tasks', () => { stateAfterOutput = snapshotTasks().tasks.find((t) => t.id === 'persist-1')?.state; sawTasks(); });
   reg.bus.emit('output', { id: sessionId, data: 'reached your session usage limit' });
   await Promise.race([emitted, new Promise((resolve) => setTimeout(resolve, 3500))]);
 
-  assert.equal(stateAfterOutput, 'rate-limited', 'taskBySession reverse index was rebuilt, rate-limit listener fired');
+  assert.equal(stateAfterOutput, 'usage-limited', 'taskBySession reverse index was rebuilt, rate-limit listener fired');
 });
 
 test('updateTask: state-only Done update does not recreate a cleaned git worktree', async () => {

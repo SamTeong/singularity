@@ -1461,10 +1461,15 @@ impl Registry {
 
     // VERIFY: registry-input
     /// `input` (`agents.mjs:559-562`): write to the live pty; failures are
-    /// logged in Node and ignored here.
+    /// logged in Node and ignored here. Written input is announced on the bus
+    /// so the task board can clear a limit overlay.
     pub fn input(&self, id: &str, data: &str) {
         if self.is_live(id) {
             let _ = self.port.write(id, data.as_bytes());
+            self.bus.emit(&BusEvent::Input {
+                id: id.to_owned(),
+                data: data.to_owned(),
+            });
         }
     }
 
@@ -2547,7 +2552,19 @@ mod tests {
         );
 
         // Rejected adapter calls stay contained, like Node's handled rejections.
+        let inputs: Arc<Mutex<Vec<(String, String)>>> = Arc::new(Mutex::new(Vec::new()));
+        let seen = inputs.clone();
+        registry.bus().subscribe(Arc::new(move |event| {
+            if let BusEvent::Input { id, data } = event {
+                seen.lock().unwrap().push((id.clone(), data.clone()));
+            }
+        }));
         registry.input("adapter-id", "later");
+        assert_eq!(
+            *inputs.lock().unwrap(),
+            [("adapter-id".to_owned(), "later".to_owned())],
+            "written input is announced on the bus"
+        );
         registry.resize("adapter-id", 100, 40);
         registry.kill("adapter-id").unwrap();
         assert_eq!(port.write_count(), 1);

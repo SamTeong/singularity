@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COLUMNS, COLUMN_DOMAIN, cardDomainId, firstEnteredAt } from './taskDomain.js';
+import { COLUMNS, COLUMN_DOMAIN, cardDomainId, firstEnteredAt, taskStateLabel } from './taskDomain.js';
 // Relative, not the `@/` alias — Node's test runner doesn't resolve it (see
 // theme/resolveSkin.js's doc comment for the same note).
 import { DOMAIN_STATE } from '../../lib/domainState.js';
@@ -61,4 +61,12 @@ test('firstEnteredAt returns null for a never-entered column or missing history'
   assert.equal(firstEnteredAt([], 'done'), null);
   assert.equal(firstEnteredAt([], 'todo'), null);
   assert.equal(firstEnteredAt([{ from: 'inprogress', to: 'todo', at: 2000 }], 'todo'), 2000);
+});
+
+test('taskStateLabel appends the local reset time to a usage limit only', () => {
+  const resetAt = new Date(2026, 0, 10, 15, 5).getTime(); // local 15:05
+  assert.equal(taskStateLabel({ state: 'usage-limited', limitResetAt: resetAt }), 'usage-limited · resets 15:05');
+  assert.equal(taskStateLabel({ state: 'usage-limited' }), 'usage-limited');
+  assert.equal(taskStateLabel({ state: 'rate-limited', limitResetAt: resetAt }), 'rate-limited');
+  assert.equal(taskStateLabel({ state: 'implementing' }), 'implementing');
 });

@@ -65,8 +65,9 @@ use crate::task_git::GitPort;
 
 /// `COLUMNS` (`tasks.mjs:20`).
 pub const COLUMNS: [&str; 4] = ["todo", "inprogress", "inreview", "done"];
-/// `OVERLAY_STATES` (`tasks.mjs:30`): legal on any column.
-pub const OVERLAY_STATES: [&str; 1] = ["rate-limited"];
+/// `OVERLAY_STATES` (`tasks.mjs:30`): legal on any column. usage-limited =
+/// Claude plan limit; rate-limited = a plain 429.
+pub const OVERLAY_STATES: [&str; 2] = ["usage-limited", "rate-limited"];
 /// `MAX_REVIEW_REJECTS` (`tasks.mjs:34`).
 pub const MAX_REVIEW_REJECTS: i64 = 3;
 /// `RETENTION_MS` (`tasks.mjs:35`).
@@ -75,6 +76,18 @@ pub const RETENTION_MS: i64 = 7 * 24 * 3600 * 1000;
 pub const SWEEP_INTERVAL: Duration = Duration::from_millis(3_600_000);
 /// The rolling output window the rate-limit regex scans (`tasks.mjs:170`).
 pub const RATE_LIMIT_TAIL_CHARS: usize = 400;
+
+/// What the output listener hands the limit loop.
+enum LimitEvent {
+    Enter {
+        id: String,
+        kind: &'static str,
+        reset_at: Option<i64>,
+    },
+    Clear {
+        id: String,
+    },
+}
 
 // VERIFY: tasks-column-states
 /// Per-column state vocabulary (SSOT, `tasks.mjs:24-29`). The em dashes are
@@ -97,14 +110,100 @@ pub fn states_for(column: &str) -> &'static [&'static str] {
 }
 
 // VERIFY: tasks-rate-limit-regex
-/// `RATE_LIMIT_RE` (`tasks.mjs:36`): Ollama 429s only ever appear in the pty
-/// stream, so the watcher scans the rolling tail for these two phrases.
+/// `RATE_LIMIT_RE` (`tasks.mjs`): Ollama 429s only ever appear in the pty
+/// stream, so the watcher scans the rolling tail for this phrase.
 pub fn rate_limit_re() -> &'static Regex {
     static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        Regex::new(r"reached your session usage limit|Request rejected \(429\)")
-            .expect("the rate-limit pattern is a valid regex")
+        Regex::new(r"Request rejected \(429\)").expect("the rate-limit pattern is a valid regex")
     })
+}
+
+/// `USAGE_LIMIT_RE` (`tasks.mjs`): Claude's plan-limit phrase.
+pub fn usage_limit_re() -> &'static Regex {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"reached your session usage limit")
+            .expect("the usage-limit pattern is a valid regex")
+    })
+}
+
+/// `classifyLimit(tail)` (`tasks.mjs`): the plan-limit phrase wins, since
+/// Claude's usage-limit error arrives as a 429 carrying it.
+pub fn classify_limit(tail: &str) -> Option<&'static str> {
+    if usage_limit_re().is_match(tail) {
+        Some("usage-limited")
+    } else if rate_limit_re().is_match(tail) {
+        Some("rate-limited")
+    } else {
+        None
+    }
+}
+
+/// `stripAnsi(s)` (`tasks.mjs`): drop escape sequences (CSI, OSC, other ESC
+/// forms) and C0 controls except `\t` `\n` `\r`, so limit phrases match the
+/// visible text of a TUI repaint.
+pub fn strip_ansi(value: &str) -> String {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[ -/]*[0-~])|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]",
+        )
+        .expect("the ANSI pattern is a valid regex")
+    })
+    .replace_all(value, "")
+    .into_owned()
+}
+
+/// `parseLimitResetAt(tail, now)` (`tasks.mjs`): best-effort epoch ms of the
+/// reset named in the tail ("resets 3pm", "reset at 3:30pm (Europe/Zurich)",
+/// "resets 15:00"), the next such wall-clock time after `now_ms` in the named
+/// zone or the host zone. Unparsable -> `None`.
+pub fn parse_limit_reset_at(tail: &str, now_ms: i64) -> Option<i64> {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        Regex::new(r"(?i)\bresets?(?:\s+at)?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?:\s*\(([^)]+)\))?")
+            .expect("the reset pattern is a valid regex")
+    });
+    let caps = re.captures(tail)?;
+    let minute_raw = caps.get(2);
+    let meridiem = caps.get(3).map(|m| m.as_str().to_ascii_lowercase());
+    if minute_raw.is_none() && meridiem.is_none() {
+        return None;
+    }
+    let mut hour: i8 = caps[1].parse().ok()?;
+    let minute: i8 = minute_raw.map_or(Some(0), |m| m.as_str().parse().ok())?;
+    if minute > 59 {
+        return None;
+    }
+    match meridiem.as_deref() {
+        Some(meridiem) => {
+            if !(1..=12).contains(&hour) {
+                return None;
+            }
+            hour = hour % 12 + if meridiem == "pm" { 12 } else { 0 };
+        }
+        None if hour > 23 => return None,
+        None => {}
+    }
+    let tz = match caps.get(4).map(|m| m.as_str().trim()) {
+        Some(name) if !name.is_empty() => jiff::tz::TimeZone::get(name).ok()?,
+        _ => jiff::tz::TimeZone::system(),
+    };
+    let now = jiff::Timestamp::from_millisecond(now_ms).ok()?;
+    let mut date = tz.to_datetime(now).date();
+    for _ in 0..2 {
+        let at = tz
+            .to_ambiguous_timestamp(date.at(hour, minute, 0, 0))
+            .compatible()
+            .ok()?
+            .as_millisecond();
+        if at > now_ms {
+            return Some(at);
+        }
+        date = date.tomorrow().ok()?;
+    }
+    None
 }
 
 /// `normalizeTags(tags)` (`tasks.mjs:376-378`): trim, lowercase, drop blanks,
@@ -359,6 +458,10 @@ pub struct Task {
     pub background_run_id: Option<String>,
     pub tool: Option<String>,
     pub done_at: Option<i64>,
+    /// The state a limit overlay covers, restored when it clears.
+    pub limit_prev_state: Option<String>,
+    /// Parsed usage-limit reset (epoch ms); `None` when unknown.
+    pub limit_reset_at: Option<i64>,
     /// Raw values loaded from disk that the typed fields above could not
     /// represent (unknown keys or a value of the wrong shape). Re-emitted on
     /// serialize, after the typed fields, so a rewrite never drops them.
@@ -404,6 +507,8 @@ impl Default for Task {
             background_run_id: None,
             tool: None,
             done_at: None,
+            limit_prev_state: None,
+            limit_reset_at: None,
             residual: serde_json::Map::new(),
             absent_keys: Vec::new(),
         }
@@ -469,6 +574,8 @@ fn task_from_record(mut record: serde_json::Map<String, Value>) -> Task {
     take!("backgroundRunId", background_run_id);
     take!("tool", tool);
     take!("doneAt", done_at);
+    take!("limitPrevState", limit_prev_state);
+    take!("limitResetAt", limit_reset_at);
     for (key, value) in record {
         residual.insert(key, value);
     }
@@ -554,6 +661,8 @@ impl Serialize for Task {
         optional!("backgroundRunId", self.background_run_id);
         optional!("tool", self.tool);
         optional!("doneAt", self.done_at);
+        optional!("limitPrevState", self.limit_prev_state);
+        optional!("limitResetAt", self.limit_reset_at);
         for (key, value) in &self.residual {
             map.serialize_entry(key, value)?;
         }
@@ -805,6 +914,9 @@ pub struct TaskService {
     /// they own, so [`TaskService::shutdown`] can abort and unsubscribe
     /// outright instead of relying on the loops noticing the watch.
     background: Mutex<BackgroundLoops>,
+    /// Wakes the limit reset timer loop to re-read the earliest
+    /// `limitResetAt` after a task record changes.
+    limit_timer: tokio::sync::Notify,
     /// Set by [`TaskService::load`] when `tasks.json` held content this build
     /// could not turn into task records. Every later persist refuses to run so
     /// the unreadable data is never overwritten (Node would clobber it).
@@ -834,6 +946,7 @@ impl TaskService {
             mutation: tokio::sync::Mutex::new(()),
             stop,
             background: Mutex::new(BackgroundLoops::default()),
+            limit_timer: tokio::sync::Notify::new(),
             load_blocked: Mutex::new(None),
         })
     }
@@ -945,6 +1058,7 @@ impl TaskService {
             state.history = history;
             state.task_by_session = task_by_session;
         }
+        self.limit_timer.notify_one(); // persisted usage limits arm the reset timer
         self.scan_orphan_worktrees();
         for task in self.tasks() {
             if task.column == "done" {
@@ -1038,7 +1152,34 @@ impl TaskService {
                 }
             })
         };
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        // Clears each usage limit at its `limitResetAt` (persisted ones too):
+        // sleeps until the earliest reset, re-reading it whenever a record
+        // changes. Re-checks at least daily so a far reset never overflows.
+        let timer = {
+            let service = self.clone();
+            let mut host = shutdown.clone();
+            let mut own = self.stop.subscribe();
+            handle.spawn(async move {
+                loop {
+                    let wait = service.next_limit_reset().map(|at| {
+                        Duration::from_millis((at - (service.clock)()).clamp(0, 86_400_000) as u64)
+                    });
+                    tokio::select! {
+                        _ = tokio::time::sleep(wait.unwrap_or_default()), if wait.is_some() => {
+                            service.clear_due_limits().await;
+                        }
+                        _ = service.limit_timer.notified() => {}
+                        changed = host.changed() => {
+                            if changed.is_err() || *host.borrow() { break }
+                        }
+                        changed = own.changed() => {
+                            if changed.is_err() || *own.borrow() { break }
+                        }
+                    }
+                }
+            })
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LimitEvent>();
         let subscription = self.bus.subscribe(self.output_listener(tx));
         let service = self.clone();
         let mut host = shutdown;
@@ -1046,8 +1187,18 @@ impl TaskService {
         let output = handle.spawn(async move {
             loop {
                 tokio::select! {
-                    Some(id) = rx.recv() => {
-                        if let Err(error) = service.update(&id, &json!({ "state": "rate-limited" })).await {
+                    Some(event) = rx.recv() => {
+                        let (id, result) = match event {
+                            LimitEvent::Enter { id, kind, reset_at } => {
+                                let result = service.enter_limit(&id, kind, reset_at).await;
+                                (id, result)
+                            }
+                            LimitEvent::Clear { id } => {
+                                let result = service.clear_limit(&id).await;
+                                (id, result)
+                            }
+                        };
+                        if let Err(error) = result {
                             service.log(&format!("rate-limit update failed for {id}: {}", error.message));
                         }
                     }
@@ -1062,14 +1213,17 @@ impl TaskService {
             service.bus.unsubscribe(subscription);
         });
         let mut background = self.background.lock().unwrap();
-        background.handles = vec![retention, output];
+        background.handles = vec![retention, timer, output];
         background.subscription = Some(subscription);
     }
 
     // VERIFY: wave6-task_weak-1
-    /// The `output` bus listener (`tasks.mjs:167-173`): records each agent's
-    /// rolling tail and hands the card id to the rate-limit loop when the tail
-    /// matches [`rate_limit_re`].
+    /// The `output` and `input` bus listener (`tasks.mjs` `initTasks`):
+    /// records each agent's rolling ANSI-stripped tail and hands the limit
+    /// loop an enter event when the tail matches [`classify_limit`]. Output
+    /// never clears (a TUI repaint proves nothing); input with visible content
+    /// to a limited card drops its tail and hands the loop a clear event, so
+    /// a limit that still holds re-flags when Claude reprints the phrase.
     ///
     /// Holds a `Weak`, like the crons status listener: the bus is reachable
     /// from the service (`self.bus`), so a strong capture would close the
@@ -1079,12 +1233,14 @@ impl TaskService {
     /// board, and an event with no board behind it has nothing to flag.
     fn output_listener(
         self: &Arc<Self>,
-        tx: tokio::sync::mpsc::UnboundedSender<String>,
+        tx: tokio::sync::mpsc::UnboundedSender<LimitEvent>,
     ) -> BusListener {
         let service = Arc::downgrade(self);
         let listener: BusListener = Arc::new(move |event: &BusEvent| {
-            let BusEvent::Output { id, data } = event else {
-                return;
+            let (id, data, is_input) = match event {
+                BusEvent::Output { id, data } => (id, data, false),
+                BusEvent::Input { id, data } => (id, data, true),
+                _ => return,
             };
             let Some(service) = service.upgrade() else {
                 return;
@@ -1096,14 +1252,33 @@ impl TaskService {
             let Some(tid) = tid else {
                 return;
             };
-            let tail = {
+            let data = strip_ansi(data);
+            if is_input {
+                // Escape-only input (focus/mouse reports, arrow keys) is not
+                // a resume.
+                if data.is_empty() {
+                    return;
+                }
+                let mut state = service.state.lock().unwrap();
+                let limited = state
+                    .find(&tid)
+                    .is_some_and(|task| OVERLAY_STATES.contains(&task.state.as_str()));
+                if limited {
+                    state.tails.remove(id);
+                    drop(state);
+                    let _ = tx.send(LimitEvent::Clear { id: tid });
+                }
+                return;
+            }
+            let (tail, limited) = {
                 let mut state = service.state.lock().unwrap();
                 let Some(task) = state.tasks.iter().find(|task| task.id == tid) else {
                     return;
                 };
-                if task.column == "done" || task.state == "rate-limited" {
+                if task.column == "done" {
                     return;
                 }
+                let limited = OVERLAY_STATES.contains(&task.state.as_str());
                 let combined = format!(
                     "{}{}",
                     state.tails.get(id).cloned().unwrap_or_default(),
@@ -1113,11 +1288,17 @@ impl TaskService {
                 let start = chars.len().saturating_sub(RATE_LIMIT_TAIL_CHARS);
                 let tail: String = chars[start..].iter().collect();
                 state.tails.insert(id.clone(), tail.clone());
-                tail
+                (tail, limited)
             };
-            if rate_limit_re().is_match(&tail) {
-                let _ = tx.send(tid);
-            }
+            let event = match (classify_limit(&tail), limited) {
+                (Some(kind), false) => LimitEvent::Enter {
+                    id: tid,
+                    kind,
+                    reset_at: parse_limit_reset_at(&tail, (service.clock)()),
+                },
+                _ => return,
+            };
+            let _ = tx.send(event);
         });
         listener
     }
@@ -1358,6 +1539,8 @@ impl TaskService {
                     .map(str::to_owned),
                 tool,
                 done_at: None,
+                limit_prev_state: None,
+                limit_reset_at: None,
                 residual: serde_json::Map::new(),
                 absent_keys: Vec::new(),
             };
@@ -1476,6 +1659,72 @@ impl TaskService {
     /// the route answers `400 {ok:false,error}` exactly like Node's unguarded
     /// `await finishDoneTask`/`ensureWorktree` after the persist (`tasks.mjs:542`).
     pub async fn update(&self, id: &str, body: &Value) -> Result<Value, TaskError> {
+        self.update_inner(id, body, None).await
+    }
+
+    /// The output watcher entering a limit overlay (`updateTaskInner(id,
+    /// { state: kind }, { limitResetAt })`); a card already limited is left
+    /// alone so the covered state is never overwritten.
+    async fn enter_limit(
+        &self,
+        id: &str,
+        kind: &str,
+        reset_at: Option<i64>,
+    ) -> Result<(), TaskError> {
+        let limited = self
+            .state
+            .lock()
+            .unwrap()
+            .find(id)
+            .is_some_and(|task| OVERLAY_STATES.contains(&task.state.as_str()));
+        if !limited {
+            self.update_inner(id, &json!({ "state": kind }), reset_at)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// `clearLimitInner(id)` (`tasks.mjs`): restore the state the overlay
+    /// covered (the column's first state when a column move made it invalid)
+    /// and drop the limit fields. State-only, so no transition record.
+    async fn clear_limit(&self, id: &str) -> Result<(), TaskError> {
+        let _guard = self.mutation.lock().await;
+        let Some(current) = self.state.lock().unwrap().find(id).cloned() else {
+            return Ok(());
+        };
+        if !OVERLAY_STATES.contains(&current.state.as_str()) {
+            return Ok(());
+        }
+        let mut next = current;
+        let allowed = states_for(&next.column);
+        let prev = next.limit_prev_state.take();
+        next.limit_reset_at = None;
+        next.residual.remove("limitPrevState");
+        next.residual.remove("limitResetAt");
+        next.state = match prev {
+            Some(prev) if allowed.contains(&prev.as_str()) => prev,
+            prev => allowed
+                .first()
+                .map(|first| (*first).to_owned())
+                .or(prev)
+                .unwrap_or(next.state),
+        };
+        next.residual.remove("state");
+        next.updated_at = (self.clock)();
+        next.residual.remove("updatedAt");
+        self.persist_staged(&next).await?;
+        self.state.lock().unwrap().replace(next);
+        self.limit_timer.notify_one();
+        self.emit();
+        Ok(())
+    }
+
+    async fn update_inner(
+        &self,
+        id: &str,
+        body: &Value,
+        limit_reset_at: Option<i64>,
+    ) -> Result<Value, TaskError> {
         let _guard = self.mutation.lock().await;
         let Some(current) = self.state.lock().unwrap().find(id).cloned() else {
             return Err(TaskError::bad("no such task"));
@@ -1546,6 +1795,21 @@ impl TaskService {
                     allowed.join("|")
                 )));
             }
+            // Entering a limit overlay remembers the state it covers; any real
+            // state ends the overlay and its limit fields.
+            if !OVERLAY_STATES.contains(&state.as_str()) {
+                next.limit_prev_state = None;
+                next.limit_reset_at = None;
+                next.residual.remove("limitPrevState");
+                next.residual.remove("limitResetAt");
+            } else if !OVERLAY_STATES.contains(&current.state.as_str()) {
+                next.limit_prev_state = Some(current.state.clone());
+                next.residual.remove("limitPrevState");
+                if state == "usage-limited" && limit_reset_at.is_some() {
+                    next.limit_reset_at = limit_reset_at;
+                    next.residual.remove("limitResetAt");
+                }
+            }
             next.state = state;
             next.residual.remove("state");
         }
@@ -1553,6 +1817,7 @@ impl TaskService {
         next.residual.remove("updatedAt");
         self.persist_staged(&next).await?;
         self.state.lock().unwrap().replace(next.clone());
+        self.limit_timer.notify_one();
         self.emit();
         if column.as_deref() == Some("done") && !was_done {
             self.finish_done_task(&next).await?;
@@ -1698,6 +1963,7 @@ impl TaskService {
             state.history.push(entry);
             (state.tasks.clone(), state.history.clone())
         };
+        self.limit_timer.notify_one();
         self.persist(&tasks, &history).await?;
         self.emit();
         Ok(())
@@ -1727,7 +1993,10 @@ impl TaskService {
     /// `sweepRetention()` (`tasks.mjs:608-616`): Done cards older than
     /// `retention_ms` auto-conclude as `completed`; per-task failures log.
     pub async fn sweep_retention(&self) {
-        let cutoff = (self.clock)() - self.config.retention_ms;
+        let now = (self.clock)();
+        // Backstop for the reset timer loop.
+        self.clear_due_limits().await;
+        let cutoff = now - self.config.retention_ms;
         let due: Vec<String> = self
             .state
             .lock()
@@ -1745,6 +2014,43 @@ impl TaskService {
                     "retention sweep: conclude failed for {id}: {}",
                     error.message
                 ));
+            }
+        }
+    }
+
+    /// The earliest `limitResetAt` among usage-limited cards.
+    fn next_limit_reset(&self) -> Option<i64> {
+        self.state
+            .lock()
+            .unwrap()
+            .tasks
+            .iter()
+            .filter(|task| task.state == "usage-limited")
+            .filter_map(|task| task.limit_reset_at)
+            .min()
+    }
+
+    /// Clear every usage limit past its parsed reset; its stale tail goes too,
+    /// so the old phrase can't re-flag the card on the next chunk.
+    async fn clear_due_limits(&self) {
+        let now = (self.clock)();
+        let reset: Vec<(String, Option<String>)> = self
+            .state
+            .lock()
+            .unwrap()
+            .tasks
+            .iter()
+            .filter(|task| {
+                task.state == "usage-limited" && task.limit_reset_at.is_some_and(|at| now >= at)
+            })
+            .map(|task| (task.id.clone(), task.session_id.clone()))
+            .collect();
+        for (id, session) in reset {
+            if let Some(session) = session {
+                self.state.lock().unwrap().tails.remove(&session);
+            }
+            if let Err(error) = self.clear_limit(&id).await {
+                self.log(&format!("limit clear failed for {id}: {}", error.message));
             }
         }
     }
@@ -2156,7 +2462,7 @@ mod tests {
                 .unwrap_err();
             assert_eq!(
                 error.message,
-                "bad state for todo (expected analyzing|clarifying|awaiting plan approval|rate-limited)"
+                "bad state for todo (expected analyzing|clarifying|awaiting plan approval|usage-limited|rate-limited)"
             );
             assert!(!error.persist_failure);
             let updated = service
@@ -2416,6 +2722,214 @@ mod tests {
         });
     }
 
+    #[test]
+    fn classify_limit_splits_the_usage_limit_from_a_plain_429() {
+        assert_eq!(
+            classify_limit(
+                "API Error: Request rejected (429) · you (x) have reached your session usage limit"
+            ),
+            Some("usage-limited")
+        );
+        assert_eq!(
+            classify_limit("reached your session usage limit"),
+            Some("usage-limited")
+        );
+        assert_eq!(
+            classify_limit("Request rejected (429)"),
+            Some("rate-limited")
+        );
+        assert_eq!(classify_limit("session usage limit"), None);
+        assert_eq!(classify_limit("HTTP 429"), None);
+    }
+
+    #[test]
+    fn parse_limit_reset_at_reads_the_reset_wall_clock() {
+        // 2026-01-10T10:00Z
+        let now = 1_768_039_200_000;
+        let hour = 3_600_000;
+        assert_eq!(
+            parse_limit_reset_at("limit · resets 3pm (UTC)", now),
+            Some(now + 5 * hour)
+        );
+        assert_eq!(
+            parse_limit_reset_at("resets 15:00 (UTC)", now),
+            Some(now + 5 * hour)
+        );
+        // 17:00 in Zurich (UTC+1 in January): 3:30pm has passed -> tomorrow,
+        // 2026-01-11T14:30Z.
+        assert_eq!(
+            parse_limit_reset_at("reset at 3:30pm (Europe/Zurich)", now + 6 * hour),
+            Some(now + 24 * hour + 4 * hour + hour / 2)
+        );
+        let local = parse_limit_reset_at("resets 3pm", now).unwrap();
+        assert!(local > now && local <= now + 24 * hour);
+        for tail in [
+            "resets soon",
+            "resets 3 times",
+            "resets 13pm",
+            "resets 3pm (Not/AZone)",
+            "no reset here",
+        ] {
+            assert_eq!(parse_limit_reset_at(tail, now), None, "{tail}");
+        }
+    }
+
+    fn task_field(service: &TaskService, id: &str, key: &str) -> Value {
+        service.snapshot()["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|task| task["id"] == id)
+            .map_or(Value::Null, |task| task.get(key).cloned().unwrap_or(Value::Null))
+    }
+
+    #[test]
+    fn limit_overlay_never_clears_on_output_clears_on_input_and_re_flags_on_the_phrase() {
+        run(async {
+            let fixture = Fixture::new("limit-overlay");
+            std::fs::write(
+                fixture.config().tasks_file,
+                r#"{"tasks":[{"id":"t1","title":"T","description":"D","repo":"/r","kind":"plain","ticketDir":"/t","reportDir":"/t","column":"inprogress","state":"implementing","transitions":[],"sessionId":"session-0"},{"id":"t2","title":"T","description":"D","repo":"/r","kind":"plain","ticketDir":"/t","reportDir":"/t","column":"inprogress","state":"working","transitions":[],"sessionId":"session-1"}],"history":[]}"#,
+            )
+            .unwrap();
+            let (service, bus) = service(
+                &fixture,
+                FakeSpawner::new(),
+                FakeGit::new(),
+                fixed_clock(1_768_039_200_000),
+            );
+            service.load().await;
+            let (tx, rx) = watch::channel(false);
+            service.start_background(&tokio::runtime::Handle::current(), rx);
+
+            let output = |data: &str| {
+                bus.emit(&BusEvent::Output {
+                    id: "session-0".to_owned(),
+                    data: data.to_owned(),
+                })
+            };
+            let input = |data: &str| {
+                bus.emit(&BusEvent::Input {
+                    id: "session-0".to_owned(),
+                    data: data.to_owned(),
+                })
+            };
+            output(
+                "\x1b[31mreached your \x1b[1msession usage limit\x1b[0m · resets 3pm (UTC)",
+            );
+            wait_for_state(&service, "t1", "usage-limited").await;
+            assert_eq!(task_field(&service, "t1", "limitPrevState"), "implementing");
+            assert_eq!(
+                task_field(&service, "t1", "limitResetAt"),
+                json!(1_768_039_200_000_i64 + 5 * 3_600_000)
+            );
+
+            // A TUI repaint: well over 400 bytes (and 400 visible chars), none
+            // of it the phrase.
+            let repaint = format!("\x1b[2K\x1b[1G\x1b[38;5;246m{}\x1b[0m\r\n", "─".repeat(20))
+                .repeat(30);
+            assert!(repaint.chars().count() > RATE_LIMIT_TAIL_CHARS);
+            output(&repaint);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(
+                task_field(&service, "t1", "state"),
+                "usage-limited",
+                "repaint output does not clear"
+            );
+
+            output("reached your session usage limit"); // back in the tail
+
+            input("\x1b[I");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(
+                task_field(&service, "t1", "state"),
+                "usage-limited",
+                "a focus report is not a resume"
+            );
+
+            input("\r");
+            wait_for_state(&service, "t1", "implementing").await;
+            assert_eq!(task_field(&service, "t1", "limitPrevState"), Value::Null);
+            assert_eq!(task_field(&service, "t1", "limitResetAt"), Value::Null);
+            assert_eq!(task_field(&service, "t1", "transitions"), json!([]));
+
+            output(" ");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(
+                task_field(&service, "t1", "state"),
+                "implementing",
+                "the stale phrase was dropped with the tail"
+            );
+
+            output("reached your session usage limit");
+            wait_for_state(&service, "t1", "usage-limited").await;
+
+            bus.emit(&BusEvent::Output {
+                id: "session-1".to_owned(),
+                data: "API Error: Request rejected (429)".to_owned(),
+            });
+            wait_for_state(&service, "t2", "rate-limited").await;
+            assert_eq!(task_field(&service, "t2", "limitPrevState"), "working");
+            assert_eq!(task_field(&service, "t2", "limitResetAt"), Value::Null);
+            let _ = tx.send(true);
+        });
+    }
+
+    #[test]
+    fn retention_sweep_clears_a_usage_limit_past_its_reset() {
+        run(async {
+            let fixture = Fixture::new("limit-reset");
+            std::fs::write(
+                fixture.config().tasks_file,
+                r#"{"tasks":[{"id":"due","title":"T","description":"D","repo":"/r","kind":"plain","ticketDir":"/t","reportDir":"/t","column":"inprogress","state":"usage-limited","limitPrevState":"fixing","limitResetAt":900,"transitions":[]},{"id":"later","title":"T","description":"D","repo":"/r","kind":"plain","ticketDir":"/t","reportDir":"/t","column":"inprogress","state":"usage-limited","limitPrevState":"fixing","limitResetAt":5000,"transitions":[]}],"history":[]}"#,
+            )
+            .unwrap();
+            let (service, _bus) = service(
+                &fixture,
+                FakeSpawner::new(),
+                FakeGit::new(),
+                fixed_clock(1000),
+            );
+            service.load().await;
+            service.sweep_retention().await;
+            assert_eq!(task_field(&service, "due", "state"), "fixing");
+            assert_eq!(task_field(&service, "due", "limitResetAt"), Value::Null);
+            assert_eq!(task_field(&service, "due", "transitions"), json!([]));
+            assert_eq!(task_field(&service, "later", "state"), "usage-limited");
+        });
+    }
+
+    #[test]
+    fn a_persisted_usage_limit_clears_at_its_reset_time_not_before() {
+        run(async {
+            let fixture = Fixture::new("limit-timer");
+            std::fs::write(
+                fixture.config().tasks_file,
+                r#"{"tasks":[{"id":"t1","title":"T","description":"D","repo":"/r","kind":"plain","ticketDir":"/t","reportDir":"/t","column":"inprogress","state":"usage-limited","limitPrevState":"fixing","limitResetAt":1100,"transitions":[]}],"history":[]}"#,
+            )
+            .unwrap();
+            let now = Arc::new(AtomicI64::new(1000));
+            let (service, _bus) = service(
+                &fixture,
+                FakeSpawner::new(),
+                FakeGit::new(),
+                mutable_clock(now.clone()),
+            );
+            service.load().await;
+            let (tx, rx) = watch::channel(false);
+            service.start_background(&tokio::runtime::Handle::current(), rx);
+            // The timer wakes after ~100 ms of real time, but the clock still
+            // says 1000: not before the reset.
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            assert_eq!(task_field(&service, "t1", "state"), "usage-limited");
+            now.store(1100, Ordering::SeqCst);
+            wait_for_state(&service, "t1", "fixing").await;
+            assert_eq!(task_field(&service, "t1", "limitResetAt"), Value::Null);
+            assert_eq!(task_field(&service, "t1", "transitions"), json!([]));
+            let _ = tx.send(true);
+        });
+    }
+
     // VERIFY: wave4-lifecycle-14
     /// `shutdown` aborts both loops and removes the `output` listener: a
     /// rate-limit phrase emitted after teardown no longer reaches the board.
@@ -2497,7 +3011,7 @@ mod tests {
     fn the_output_listener_holds_a_weak_reference_to_the_service() {
         let fixture = Fixture::new("weak-listener");
         let (service, bus) = service(&fixture, FakeSpawner::new(), FakeGit::new(), fixed_clock(1));
-        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<LimitEvent>();
         bus.subscribe(service.output_listener(tx));
         let weak = Arc::downgrade(&service);
         drop(service);

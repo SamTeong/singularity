@@ -18,7 +18,8 @@ const STATES = {
   inreview: ['reviewing', 'parked — needs human', 'parked — merge conflict', 'awaiting human merge', 'awaiting human review', 'stopped — budget'],
   done: ['complete', 'report ready'],
 };
-const OVERLAY_STATES = ['rate-limited'];
+// usage-limited = Claude plan limit; rate-limited = a plain 429 (server/tasks.mjs).
+const OVERLAY_STATES = ['usage-limited', 'rate-limited'];
 
 // The `tasks` WS frame — same shape as the on-connect burst (ws.js), so a
 // mutation converges the board from the socket.
@@ -126,6 +127,14 @@ export function registerTasks(server) {
       const allowed = [...(STATES[col] ?? []), ...OVERLAY_STATES];
       if (!allowed.includes(s)) {
         return new Response(400, {}, { ok: false, error: `bad state for ${col} (expected ${allowed.join('|')})` });
+      }
+      // Overlay bookkeeping (server/tasks.mjs updateTaskInner): entering an
+      // overlay remembers the prior state; a real state drops the limit fields.
+      if (!OVERLAY_STATES.includes(s)) {
+        delete next.limitPrevState;
+        delete next.limitResetAt;
+      } else if (!OVERLAY_STATES.includes(t.state)) {
+        next.limitPrevState = t.state;
       }
       next.state = s;
     }

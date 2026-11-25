@@ -42,6 +42,20 @@ export const cardDomainId = (task, agent) =>
   agent ? (KIND_TO_DOMAIN[KIND[agent.status]] ?? 'review') : (COLUMN_DOMAIN[task.column] ?? 'queued');
 
 /**
+ * The task-state text a badge shows: `task.state`, plus the local reset
+ * wall-clock for a Claude usage limit when the daemon parsed one
+ * (server/tasks.mjs limitResetAt).
+ * @param {{ state?: string, limitResetAt?: number }} task
+ * @returns {string|undefined}
+ */
+export const taskStateLabel = (task) => {
+  if (task.state !== 'usage-limited' || typeof task.limitResetAt !== 'number') return task.state;
+  const d = new Date(task.limitResetAt);
+  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return `usage-limited · resets ${hhmm}`;
+};
+
+/**
  * Epoch ms the task first entered `columnId`. To-Do starts at task creation;
  * later columns use their first durable transition record targeting that
  * column (appended by server/tasks.mjs updateTaskInner on a real column

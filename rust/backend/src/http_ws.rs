@@ -507,6 +507,7 @@ fn frame_for(
         }
         BusEvent::History(data) => Some(text(&tagged("history", data))),
         BusEvent::Background(data) => Some(text(&tagged("background", data))),
+        BusEvent::Input { .. } => None,
     }
 }
 

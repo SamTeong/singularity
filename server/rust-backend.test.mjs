@@ -1562,6 +1562,11 @@ test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout'
     const ok = await backend.oneShot(process.execPath, [okScript], { timeout: 10_000 });
     assert.equal(ok.stdout, 'bridge-ok');
 
+    const stdinScript = join(base, 'stdin.mjs');
+    await writeFile(stdinScript, "process.stdin.pipe(process.stdout);");
+    const piped = await backend.oneShot(process.execPath, [stdinScript], { timeout: 10_000, input: 'bridge-stdin-ok' });
+    assert.equal(piped.stdout, 'bridge-stdin-ok');
+
     const previousProbe = process.env.SING_BRIDGE_PROBE;
     process.env.SING_BRIDGE_PROBE = 'bridge-default-env-ok';
     try {

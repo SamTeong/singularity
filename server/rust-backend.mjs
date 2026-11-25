@@ -757,6 +757,7 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       const payload = await oneShotRequest({
         op: 'oneshot_async', bin, args: args ?? [], timeout_ms: opts?.timeout ?? null,
         max_buffer: opts?.maxBuffer ?? null, env: { ...(opts?.env ?? process.env) },
+        input: opts?.input ?? null, // written to the child's stdin, then closed
       });
       if (payload.ok) return { stdout: payload.stdout };
       throw oneShotError(payload, bin, args, opts?.timeout);
