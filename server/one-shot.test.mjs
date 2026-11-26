@@ -4,7 +4,7 @@
 // default backend executor (setOneShotBackend) that history.mjs's caller
 // parses through. SINGULARITY_HOME + dummy CLAUDE_BIN/CODEX_BIN/OLLAMA_BIN
 // are set before the module graph is imported (agents.mjs throws without
-// them); every spawn is a fake — no real CLI runs. Run: pnpm test
+// them); no provider CLI runs. Run: pnpm test
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
@@ -21,7 +21,7 @@ for (const [name, bin] of [['CLAUDE_BIN', 'fake-claude'], ['CODEX_BIN', 'fake-co
 mkdirSync(join(scratch, 'singularity', 'state'), { recursive: true });
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { runOneShotPrompt, setOneShotBackend } = await import('./one-shot.mjs');
+const { oneShotSpawn, runOneShotPrompt, setOneShotBackend } = await import('./one-shot.mjs');
 const { STATE_DIR, CLAUDE_BIN, CODEX_BIN, OLLAMA_BIN } = await import('./agents.mjs');
 
 const calls = [];
@@ -60,6 +60,8 @@ test('claude branch rejects an is_error envelope on exit 0', async () => {
   await assert.rejects(runOneShotPrompt('claude', 'haiku', 'p', { spawn: fakeSpawn(limited) }), /^Error: usage limit reached$/);
   const bare = JSON.stringify({ is_error: true, subtype: 'error_max_turns' });
   await assert.rejects(runOneShotPrompt('claude', 'haiku', 'p', { spawn: fakeSpawn(bare), includeMetadata: true }), /^Error: error_max_turns$/);
+  const misleading = JSON.stringify({ is_error: true, subtype: 'success', result: '' });
+  await assert.rejects(runOneShotPrompt('claude', 'haiku', 'p', { spawn: fakeSpawn(misleading) }), /^Error: claude one-shot failed$/);
 });
 
 test('the fallback execFile path writes the prompt to stdin and closes it', async () => {
@@ -69,6 +71,14 @@ test('the fallback execFile path writes the prompt to stdin and closes it', asyn
   });
   await runOneShotPrompt('ollama', 'llama', 'long prompt', { spawn });
   assert.deepEqual(ended, ['long prompt']);
+});
+
+test('the standalone executor delivers the full prompt to a real child', async () => {
+  const script = join(scratch, 'echo-stdin.cjs');
+  writeFileSync(script, 'process.stdin.pipe(process.stdout);');
+  const input = 'multiline prompt\n'.repeat(5_000);
+  const { stdout } = await oneShotSpawn(process.execPath, [script], { input, timeout: 10_000 });
+  assert.equal(stdout, input);
 });
 
 test('codex branch reads the -o answer file, parses usage from stdout, and cleans up', async () => {

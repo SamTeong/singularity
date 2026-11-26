@@ -74,6 +74,9 @@ pub const MAX_REVIEW_REJECTS: i64 = 3;
 pub const RETENTION_MS: i64 = 7 * 24 * 3600 * 1000;
 /// The `.unref()`'d sweep interval (`tasks.mjs:163`).
 pub const SWEEP_INTERVAL: Duration = Duration::from_millis(3_600_000);
+/// Retry delay when a due limit clear could not persist, so the reset timer
+/// backs off instead of spinning on a zero-length wait.
+const LIMIT_RETRY_DELAY: Duration = Duration::from_secs(30);
 /// The rolling output window the rate-limit regex scans (`tasks.mjs:170`).
 pub const RATE_LIMIT_TAIL_CHARS: usize = 400;
 
@@ -1160,15 +1163,14 @@ impl TaskService {
             let mut host = shutdown.clone();
             let mut own = self.stop.subscribe();
             handle.spawn(async move {
+                let mut retry = false;
                 loop {
-                    let wait = service.next_limit_reset().map(|at| {
-                        Duration::from_millis((at - (service.clock)()).clamp(0, 86_400_000) as u64)
-                    });
+                    let wait = service.limit_wait(retry);
                     tokio::select! {
                         _ = tokio::time::sleep(wait.unwrap_or_default()), if wait.is_some() => {
-                            service.clear_due_limits().await;
+                            retry = !service.clear_due_limits().await;
                         }
-                        _ = service.limit_timer.notified() => {}
+                        _ = service.limit_timer.notified() => { retry = false; }
                         changed = host.changed() => {
                             if changed.is_err() || *host.borrow() { break }
                         }
@@ -1259,18 +1261,11 @@ impl TaskService {
                 if data.is_empty() {
                     return;
                 }
-                let mut state = service.state.lock().unwrap();
-                let limited = state
-                    .find(&tid)
-                    .is_some_and(|task| OVERLAY_STATES.contains(&task.state.as_str()));
-                if limited {
-                    state.tails.remove(id);
-                    drop(state);
-                    let _ = tx.send(LimitEvent::Clear { id: tid });
-                }
+                service.state.lock().unwrap().tails.remove(id);
+                let _ = tx.send(LimitEvent::Clear { id: tid });
                 return;
             }
-            let (tail, limited) = {
+            let tail = {
                 let mut state = service.state.lock().unwrap();
                 let Some(task) = state.tasks.iter().find(|task| task.id == tid) else {
                     return;
@@ -1278,7 +1273,6 @@ impl TaskService {
                 if task.column == "done" {
                     return;
                 }
-                let limited = OVERLAY_STATES.contains(&task.state.as_str());
                 let combined = format!(
                     "{}{}",
                     state.tails.get(id).cloned().unwrap_or_default(),
@@ -1288,17 +1282,19 @@ impl TaskService {
                 let start = chars.len().saturating_sub(RATE_LIMIT_TAIL_CHARS);
                 let tail: String = chars[start..].iter().collect();
                 state.tails.insert(id.clone(), tail.clone());
-                (tail, limited)
+                tail
             };
-            let event = match (classify_limit(&tail), limited) {
-                (Some(kind), false) => LimitEvent::Enter {
-                    id: tid,
-                    kind,
-                    reset_at: parse_limit_reset_at(&tail, (service.clock)()),
-                },
-                _ => return,
+            // Every classified chunk goes to the loop: it dedupes a settled
+            // overlay, promotes a plain 429 that was really a usage limit, and
+            // attaches a reset that arrives after the phrase.
+            let Some(kind) = classify_limit(&tail) else {
+                return;
             };
-            let _ = tx.send(event);
+            let _ = tx.send(LimitEvent::Enter {
+                id: tid,
+                kind,
+                reset_at: parse_limit_reset_at(&tail, (service.clock)()),
+            });
         });
         listener
     }
@@ -1659,26 +1655,45 @@ impl TaskService {
     /// the route answers `400 {ok:false,error}` exactly like Node's unguarded
     /// `await finishDoneTask`/`ensureWorktree` after the persist (`tasks.mjs:542`).
     pub async fn update(&self, id: &str, body: &Value) -> Result<Value, TaskError> {
-        self.update_inner(id, body, None).await
+        let _guard = self.mutation.lock().await;
+        self.update_locked(id, body, None).await
     }
 
     /// The output watcher entering a limit overlay (`updateTaskInner(id,
-    /// { state: kind }, { limitResetAt })`); a card already limited is left
-    /// alone so the covered state is never overwritten.
+    /// { state: kind }, { limitResetAt })`). A card already in the same
+    /// overlay is left alone so the covered state is never overwritten, but a
+    /// plain 429 promotes to usage-limited and a usage limit that gains its
+    /// reset text later attaches it.
     async fn enter_limit(
         &self,
         id: &str,
         kind: &str,
         reset_at: Option<i64>,
     ) -> Result<(), TaskError> {
-        let limited = self
-            .state
-            .lock()
-            .unwrap()
-            .find(id)
-            .is_some_and(|task| OVERLAY_STATES.contains(&task.state.as_str()));
-        if !limited {
-            self.update_inner(id, &json!({ "state": kind }), reset_at)
+        let _guard = self.mutation.lock().await;
+        let (current, has_reset) = {
+            let state = self.state.lock().unwrap();
+            let Some(task) = state.find(id) else {
+                return Ok(());
+            };
+            if task.column == "done" {
+                return Ok(());
+            }
+            (
+                OVERLAY_STATES
+                    .contains(&task.state.as_str())
+                    .then(|| task.state.clone()),
+                task.limit_reset_at.is_some(),
+            )
+        };
+        let update = match current.as_deref() {
+            None => true,
+            Some("rate-limited") => kind == "usage-limited",
+            Some("usage-limited") => kind == "usage-limited" && reset_at.is_some() && !has_reset,
+            Some(_) => false,
+        };
+        if update {
+            self.update_locked(id, &json!({ "state": kind }), reset_at)
                 .await?;
         }
         Ok(())
@@ -1719,13 +1734,12 @@ impl TaskService {
         Ok(())
     }
 
-    async fn update_inner(
+    async fn update_locked(
         &self,
         id: &str,
         body: &Value,
         limit_reset_at: Option<i64>,
     ) -> Result<Value, TaskError> {
-        let _guard = self.mutation.lock().await;
         let Some(current) = self.state.lock().unwrap().find(id).cloned() else {
             return Err(TaskError::bad("no such task"));
         };
@@ -1802,9 +1816,14 @@ impl TaskService {
                 next.limit_reset_at = None;
                 next.residual.remove("limitPrevState");
                 next.residual.remove("limitResetAt");
-            } else if !OVERLAY_STATES.contains(&current.state.as_str()) {
-                next.limit_prev_state = Some(current.state.clone());
-                next.residual.remove("limitPrevState");
+            } else {
+                if !OVERLAY_STATES.contains(&current.state.as_str()) {
+                    next.limit_prev_state = Some(current.state.clone());
+                    next.residual.remove("limitPrevState");
+                }
+                // A usage limit arrives in pieces: a plain 429 may have flagged
+                // the card first, or the reset text may follow the phrase.
+                // Attach the reset without touching the covered state.
                 if state == "usage-limited" && limit_reset_at.is_some() {
                     next.limit_reset_at = limit_reset_at;
                     next.residual.remove("limitResetAt");
@@ -1813,10 +1832,28 @@ impl TaskService {
             next.state = state;
             next.residual.remove("state");
         }
+        let left_overlay = OVERLAY_STATES.contains(&current.state.as_str())
+            && !OVERLAY_STATES.contains(&next.state.as_str());
+        // A column-only move to Done ends the overlay without a `state` in the
+        // body, so clear the limit fields the state branch above would have.
+        if body.get("state").is_none() && left_overlay {
+            next.limit_prev_state = None;
+            next.limit_reset_at = None;
+            next.residual.remove("limitPrevState");
+            next.residual.remove("limitResetAt");
+        }
         next.updated_at = (self.clock)();
         next.residual.remove("updatedAt");
         self.persist_staged(&next).await?;
-        self.state.lock().unwrap().replace(next.clone());
+        {
+            let mut state = self.state.lock().unwrap();
+            state.replace(next.clone());
+            // The overlay's stale phrase would re-flag the card on its next
+            // output chunk.
+            if left_overlay && let Some(session) = next.session_id.as_deref() {
+                state.tails.remove(session);
+            }
+        }
         self.limit_timer.notify_one();
         self.emit();
         if column.as_deref() == Some("done") && !was_done {
@@ -2018,21 +2055,33 @@ impl TaskService {
         }
     }
 
-    /// The earliest `limitResetAt` among usage-limited cards.
-    fn next_limit_reset(&self) -> Option<i64> {
-        self.state
-            .lock()
-            .unwrap()
+    /// The reset timer's next wait. A due reset whose clear could not persist
+    /// is still due, so retrying it immediately would spin: it waits the
+    /// bounded retry delay, but never past a nearer future reset.
+    fn limit_wait(&self, retry: bool) -> Option<Duration> {
+        let now = (self.clock)();
+        let state = self.state.lock().unwrap();
+        state
             .tasks
             .iter()
             .filter(|task| task.state == "usage-limited")
             .filter_map(|task| task.limit_reset_at)
+            .map(|at| {
+                let wait = at - now;
+                if retry && wait <= 0 {
+                    LIMIT_RETRY_DELAY.as_millis() as i64
+                } else {
+                    wait
+                }
+            })
             .min()
+            .map(|wait| Duration::from_millis(wait.clamp(0, 86_400_000) as u64))
     }
 
     /// Clear every usage limit past its parsed reset; its stale tail goes too,
-    /// so the old phrase can't re-flag the card on the next chunk.
-    async fn clear_due_limits(&self) {
+    /// so the old phrase can't re-flag the card on the next chunk. Returns
+    /// `false` when a clear failed to persist and a due overlay remains.
+    async fn clear_due_limits(&self) -> bool {
         let now = (self.clock)();
         let reset: Vec<(String, Option<String>)> = self
             .state
@@ -2045,14 +2094,17 @@ impl TaskService {
             })
             .map(|task| (task.id.clone(), task.session_id.clone()))
             .collect();
+        let mut cleared = true;
         for (id, session) in reset {
             if let Some(session) = session {
                 self.state.lock().unwrap().tails.remove(&session);
             }
             if let Err(error) = self.clear_limit(&id).await {
+                cleared = false;
                 self.log(&format!("limit clear failed for {id}: {}", error.message));
             }
         }
+        cleared
     }
 }
 
@@ -2442,6 +2494,19 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("task {id} never reached state {state}");
+    }
+
+    async fn wait_for_field(service: &TaskService, id: &str, key: &str, expected: Value) {
+        for _ in 0..200 {
+            if task_field(service, id, key) == expected {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "task {id} field {key} never became {expected}, is {}",
+            task_field(service, id, key)
+        );
     }
 
     // VERIFY: tasks-tests-state-vocabulary
@@ -2927,6 +2992,177 @@ mod tests {
             assert_eq!(task_field(&service, "t1", "limitResetAt"), Value::Null);
             assert_eq!(task_field(&service, "t1", "transitions"), json!([]));
             let _ = tx.send(true);
+        });
+    }
+
+    // VERIFY: tasks-tests-limit-split-promotion
+    /// Claude's usage limit can span chunks: a plain 429 flags first, then the
+    /// usage phrase promotes the card, then the reset text attaches.
+    #[test]
+    fn a_split_usage_limit_promotes_a_429_and_attaches_a_late_reset() {
+        run(async {
+            let fixture = Fixture::new("limit-split");
+            std::fs::write(
+                fixture.config().tasks_file,
+                r#"{"tasks":[{"id":"t1","title":"T","description":"D","repo":"/r","kind":"plain","ticketDir":"/t","reportDir":"/t","column":"inprogress","state":"implementing","transitions":[],"sessionId":"session-0"}],"history":[]}"#,
+            )
+            .unwrap();
+            // 2026-01-10T10:00Z: "resets 3pm (UTC)" is five hours out.
+            let now = 1_768_039_200_000;
+            let (service, bus) = service(
+                &fixture,
+                FakeSpawner::new(),
+                FakeGit::new(),
+                fixed_clock(now),
+            );
+            service.load().await;
+            let (tx, rx) = watch::channel(false);
+            service.start_background(&tokio::runtime::Handle::current(), rx);
+            let output = |data: &str| {
+                bus.emit(&BusEvent::Output {
+                    id: "session-0".to_owned(),
+                    data: data.to_owned(),
+                })
+            };
+
+            output("API Error: Request rejected (429)");
+            wait_for_state(&service, "t1", "rate-limited").await;
+            assert_eq!(task_field(&service, "t1", "limitPrevState"), "implementing");
+
+            // The usage phrase arrives in the next chunk: promote, keep the
+            // covered state, and leave the reset open until its text arrives.
+            output(" · you (x) have reached your session usage limit");
+            wait_for_state(&service, "t1", "usage-limited").await;
+            assert_eq!(task_field(&service, "t1", "limitPrevState"), "implementing");
+            assert_eq!(task_field(&service, "t1", "limitResetAt"), Value::Null);
+
+            output(" · resets 3pm (UTC)");
+            wait_for_field(&service, "t1", "limitResetAt", json!(now + 5 * 3_600_000)).await;
+            assert_eq!(task_field(&service, "t1", "state"), "usage-limited");
+            assert_eq!(task_field(&service, "t1", "limitPrevState"), "implementing");
+            assert_eq!(task_field(&service, "t1", "transitions"), json!([]));
+            let _ = tx.send(true);
+        });
+    }
+
+    // VERIFY: tasks-tests-limit-exit-clears
+    /// An explicit update that ends an overlay drops its limit metadata and
+    /// PTY tail; a normal column move keeps the overlay.
+    #[test]
+    fn an_explicit_update_that_ends_an_overlay_drops_its_metadata_and_tail() {
+        run(async {
+            let fixture = Fixture::new("limit-exit");
+            let (service, _bus) = service(
+                &fixture,
+                FakeSpawner::new(),
+                FakeGit::new(),
+                fixed_clock(1000),
+            );
+            let limited = |id: &str, column: &str, session: &str| Task {
+                column: column.to_owned(),
+                state: "usage-limited".to_owned(),
+                limit_prev_state: Some("implementing".to_owned()),
+                limit_reset_at: Some(5000),
+                session_id: Some(session.to_owned()),
+                ..task(id)
+            };
+            service.seed(limited("done", "inprogress", "session-done"));
+            service.seed(limited("state", "inprogress", "session-state"));
+            service.seed(limited("keep", "inprogress", "session-keep"));
+            {
+                let mut state = service.state.lock().unwrap();
+                for session in ["session-done", "session-state", "session-keep"] {
+                    state.tails.insert(
+                        session.to_owned(),
+                        "reached your session usage limit".to_owned(),
+                    );
+                }
+            }
+
+            let done = service
+                .update("done", &json!({ "column": "done" }))
+                .await
+                .unwrap();
+            assert_eq!(done["state"], "complete");
+            assert_eq!(done.get("limitPrevState"), None);
+            assert_eq!(done.get("limitResetAt"), None);
+            service
+                .enter_limit("done", "usage-limited", Some(5000))
+                .await
+                .unwrap();
+            assert_eq!(task_field(&service, "done", "state"), "complete");
+
+            service
+                .update("state", &json!({ "state": "implementing" }))
+                .await
+                .unwrap();
+            assert_eq!(task_field(&service, "state", "limitPrevState"), Value::Null);
+            assert_eq!(task_field(&service, "state", "limitResetAt"), Value::Null);
+
+            service
+                .update("keep", &json!({ "column": "inreview" }))
+                .await
+                .unwrap();
+            assert_eq!(task_field(&service, "keep", "state"), "usage-limited");
+            assert_eq!(
+                task_field(&service, "keep", "limitPrevState"),
+                "implementing"
+            );
+            assert_eq!(task_field(&service, "keep", "limitResetAt"), json!(5000));
+
+            let state = service.state.lock().unwrap();
+            assert!(!state.tails.contains_key("session-done"));
+            assert!(!state.tails.contains_key("session-state"));
+            assert!(state.tails.contains_key("session-keep"));
+        });
+    }
+
+    // VERIFY: tasks-tests-limit-retry-backoff
+    /// A due overlay whose clear cannot persist stays due; the reset timer
+    /// waits the bounded retry delay instead of a zero-length spin, while a
+    /// future reset still wakes exactly at its reset time.
+    #[test]
+    fn a_due_limit_that_cannot_persist_backs_off_instead_of_spinning() {
+        run(async {
+            let fixture = Fixture::new("limit-retry");
+            // An unreadable tasks.json blocks every write (persist refuses to
+            // clobber it), like a corrupt file at startup.
+            std::fs::write(fixture.config().tasks_file, "not json").unwrap();
+            let (service, _bus) = service(
+                &fixture,
+                FakeSpawner::new(),
+                FakeGit::new(),
+                fixed_clock(1000),
+            );
+            service.load().await;
+            service.seed(Task {
+                column: "inprogress".to_owned(),
+                state: "usage-limited".to_owned(),
+                limit_prev_state: Some("fixing".to_owned()),
+                limit_reset_at: Some(900),
+                session_id: Some("session-0".to_owned()),
+                ..task("t1")
+            });
+            assert!(!service.clear_due_limits().await);
+            assert_eq!(task_field(&service, "t1", "state"), "usage-limited");
+            // Only the stuck overlay: the timer waits the bounded retry delay
+            // instead of re-sleeping for zero.
+            assert_eq!(service.limit_wait(true), Some(LIMIT_RETRY_DELAY));
+
+            service.seed(Task {
+                state: "usage-limited".to_owned(),
+                limit_prev_state: Some("fixing".to_owned()),
+                limit_reset_at: Some(1600),
+                ..task("later")
+            });
+            // A nearer future reset still wakes on time, so the retry delay
+            // never holds up another card's normal expiry.
+            assert_eq!(service.limit_wait(true), Some(Duration::from_millis(600)));
+            assert_eq!(
+                service.limit_wait(false),
+                Some(Duration::from_millis(0)),
+                "an unretried due reset still fires immediately"
+            );
         });
     }
 

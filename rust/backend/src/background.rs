@@ -134,7 +134,7 @@ impl BackgroundRegistry for Registry {
     }
 
     fn input(&self, id: &str, data: &str) {
-        Registry::input(self, id, data)
+        self.write_input(id, data);
     }
 
     fn kill(&self, id: &str) -> Result<(), String> {

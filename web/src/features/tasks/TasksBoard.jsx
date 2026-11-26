@@ -39,7 +39,7 @@ import { Stamp, StatusLegend, SegmentBar, toneHue } from 'phosphor-console-theme
 import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
 import { insetQuery } from '@/lib/sheetInset.js';
 import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
-import { COLUMNS, COLUMN_DOMAIN, cardDomainId, taskStateLabel } from '@/features/tasks/taskDomain.js';
+import { COLUMNS, COLUMN_DOMAIN, cardDomainId, isLimitState, taskStateLabel } from '@/features/tasks/taskDomain.js';
 import { matchesTags as matchesAnyTag, compareHistory } from '@/features/tasks/historySort.mjs';
 
 // Read the reduced-motion preference once at mount for the transcript sheet —
@@ -953,11 +953,10 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                             `dom`), never a second hardcoded copy. ZAPAC keeps
                             the original literal status word untouched. */}
                         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mb: '9px' }}>
-                          {agent
-                            ? <StatusPill status={KIND[agent.status] ?? 'review'}>{phosphor ? `${dom.jp} ${dom.en}` : agent.status}</StatusPill>
-                            : (task.state && (phosphor
-                              ? <Stamp tone={dom.tone} filled={dom.filled} size="sm">{`${dom.jp} ${dom.en}`}</Stamp>
-                              : <Chip size="small" label={taskStateLabel(task)} sx={(t) => statePill(t)} />))}
+                          {agent && <StatusPill status={KIND[agent.status] ?? 'review'}>{phosphor ? `${dom.jp} ${dom.en}` : agent.status}</StatusPill>}
+                          {task.state && (!agent || isLimitState(task)) && (phosphor
+                            ? <Stamp tone={dom.tone} filled={dom.filled} size="sm">{isLimitState(task) ? taskStateLabel(task) : `${dom.jp} ${dom.en}`}</Stamp>
+                            : <Chip size="small" label={taskStateLabel(task)} sx={(t) => statePill(t)} />)}
                           <Typography variant="code" sx={(t) => (phosphor
                             ? { ml: 'auto', fontSize: 10, color: t.nerv.hue.amber, fontFamily: t.nerv.fonts.mono, letterSpacing: '.08em', whiteSpace: 'nowrap' }
                             : { ml: 'auto', fontSize: 11, color: 'text.disabled' })}>

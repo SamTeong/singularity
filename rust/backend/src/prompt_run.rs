@@ -8,8 +8,8 @@
 //! Bins are injected absolute paths (`CLAUDE_BIN`/`OLLAMA_BIN`/`CODEX_BIN`; no
 //! PATH fallback), `state_dir` is the Node `STATE_DIR` that holds codex's
 //! temporary answer file, and `env` is applied over the inherited environment.
-//! Execution rides `crate::oneshot::run` (stdin-null, windowsHide, timeout
-//! kill, maxBuffer parity) inside `tokio::task::spawn_blocking`.
+//! Execution uses `crate::oneshot::run_with_input` to write the prompt, close
+//! stdin, and apply the Windows process, timeout, and output buffer settings.
 use crate::http_projects::{SummaryCall, SummaryModel};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
@@ -206,7 +206,7 @@ pub(crate) fn run_blocking(
                     .map(str::to_owned)
             };
             return Err(text("result")
-                .or_else(|| text("subtype"))
+                .or_else(|| text("subtype").filter(|subtype| subtype != "success"))
                 .unwrap_or_else(|| "claude one-shot failed".to_owned()));
         }
         let usage = envelope.and_then(|envelope| envelope.get("usage").cloned());
@@ -542,6 +542,25 @@ mod tests {
         ))
         .unwrap_err();
         assert_eq!(error, "error_max_turns");
+
+        let misleading = scratch.bin(
+            "fake-claude-is-error-empty",
+            "echo {\"is_error\":true,\"subtype\":\"success\",\"result\":\"\"}\n",
+            "echo '{\"is_error\":true,\"subtype\":\"success\",\"result\":\"\"}'\n",
+        );
+        let deps = PromptRunDeps {
+            claude_bin: Some(misleading),
+            ..deps
+        };
+        let error = block_on(run_prompt(
+            &deps,
+            "claude",
+            "haiku",
+            "p",
+            PromptRunOpts::default(),
+        ))
+        .unwrap_err();
+        assert_eq!(error, "claude one-shot failed");
     }
 
     #[test]

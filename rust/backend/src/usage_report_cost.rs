@@ -10,6 +10,19 @@ use serde_json::Value;
 use std::path::Path;
 
 const DEFAULT_THRESHOLD: f64 = 200_000.0;
+const OPENAI_LONG_CONTEXT_THRESHOLD: f64 = 272_000.0;
+// stats.mjs:550-556. Fixed keys always use 272k; default keys use it only when
+// pricing.json omits `long_context_threshold`.
+const FIXED_OPENAI_LONG_CONTEXT_KEYS: [&str; 4] =
+    ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna"];
+const DEFAULT_OPENAI_LONG_CONTEXT_KEYS: [&str; 6] = [
+    "gpt-6.2-astra",
+    "gpt-6.2-sol",
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+];
 
 /// `pricing.json` as the report sees it. `base`/`above` keep the document's
 /// key order because `price_key` matches in that order (stats.mjs:534-537).
@@ -17,7 +30,7 @@ const DEFAULT_THRESHOLD: f64 = 200_000.0;
 pub struct Pricing {
     base: Vec<(String, [f64; 4])>,
     above: Vec<(String, [f64; 4])>,
-    long_context_threshold: f64,
+    long_context_threshold: Option<f64>,
     default_key: String,
 }
 
@@ -26,7 +39,7 @@ impl Default for Pricing {
         Self {
             base: Vec::new(),
             above: Vec::new(),
-            long_context_threshold: DEFAULT_THRESHOLD,
+            long_context_threshold: None,
             default_key: String::new(),
         }
     }
@@ -89,7 +102,7 @@ impl Pricing {
             && value.is_finite()
             && value > 0.0
         {
-            pricing.long_context_threshold = value;
+            pricing.long_context_threshold = Some(value);
         }
         if let Some(Value::String(key)) = map.get("default_key") {
             pricing.default_key = key.clone();
@@ -150,11 +163,21 @@ impl Pricing {
     pub fn msg_cost_tiered(&self, model: &str, i: f64, o: f64, cr: f64, cc: f64) -> Option<f64> {
         let key = self.price_key(model)?;
         // Sol/Luna surcharge above 272k and haiku-5-5 above 100k are
-        // model-specific quirks, not part of the pricing.json schema.
-        let threshold = match key {
-            "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-sol" | "gpt-6.1-terra" => 272_000.0,
-            "haiku-5-5" => 100_000.0,
-            _ => self.long_context_threshold,
+        // model-specific quirks, not part of the pricing.json schema. The
+        // remaining OpenAI keys use 272k only when no global threshold is set
+        // (stats.mjs:620-622).
+        let threshold = if FIXED_OPENAI_LONG_CONTEXT_KEYS.contains(&key) {
+            OPENAI_LONG_CONTEXT_THRESHOLD
+        } else if key == "haiku-5-5" {
+            100_000.0
+        } else {
+            self.long_context_threshold.unwrap_or(
+                if DEFAULT_OPENAI_LONG_CONTEXT_KEYS.contains(&key) {
+                    OPENAI_LONG_CONTEXT_THRESHOLD
+                } else {
+                    DEFAULT_THRESHOLD
+                },
+            )
         };
         if let Some([inp, out, crp, ccp]) = self.above_rate(key)
             && i + cr + cc > threshold
@@ -722,6 +745,36 @@ mod tests {
             Some((150_000.0 + 50_001.0) * 10.0 / 1e6)
         );
         assert_eq!(table.msg_cost_tiered("unpriced", 1.0, 1.0, 1.0, 1.0), None);
+    }
+
+    #[test]
+    fn omitted_threshold_uses_272k_for_known_openai_long_context_keys() {
+        let table = pricing(
+            r#"{"base":{"gpt-5.6-sol":[1,1,1,1],"gpt-6.2-astra":[1,1,1,1]},"above_200k":{"gpt-5.6-sol":[10,10,10,10],"gpt-6.2-astra":[10,10,10,10]}}"#,
+        );
+        for model in ["gpt-5.6-sol", "gpt-6.2-astra"] {
+            let at = table
+                .msg_cost_tiered(model, 272_000.0, 0.0, 0.0, 0.0)
+                .unwrap();
+            let above = table
+                .msg_cost_tiered(model, 272_001.0, 0.0, 0.0, 0.0)
+                .unwrap();
+            assert!((at - 0.272).abs() < 1e-9, "{model} at 272k");
+            assert!((above - 2.720_01).abs() < 1e-9, "{model} above 272k");
+        }
+
+        // An explicitly configured global threshold overrides the 272k default.
+        let configured = pricing(
+            r#"{"base":{"gpt-5.6-sol":[1,1,1,1]},"above_200k":{"gpt-5.6-sol":[10,10,10,10]},"long_context_threshold":300000}"#,
+        );
+        let below = configured
+            .msg_cost_tiered("gpt-5.6-sol", 272_001.0, 0.0, 0.0, 0.0)
+            .unwrap();
+        let above = configured
+            .msg_cost_tiered("gpt-5.6-sol", 300_001.0, 0.0, 0.0, 0.0)
+            .unwrap();
+        assert!((below - 0.272_001).abs() < 1e-9);
+        assert!((above - 3.000_01).abs() < 1e-9);
     }
 
     #[test]

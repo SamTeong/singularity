@@ -50,7 +50,7 @@ import { Stamp, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState } from '@/lib/domainState.js';
 import { insetQuery } from '@/lib/sheetInset.js';
 import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
-import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId, firstEnteredAt, taskStateLabel } from '@/features/tasks/taskDomain.js';
+import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId, firstEnteredAt, isLimitState, taskStateLabel } from '@/features/tasks/taskDomain.js';
 
 // Live agent states — an "Open session" action only makes sense while a real
 // claude process is attached (`isLive` comes from agentStatus.js, shared with
@@ -372,6 +372,9 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
             {agent
               ? <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>
               : (task.state && <Stamp tone={dom.tone} filled={dom.filled} size="sm">{taskStateLabel(task)}</Stamp>)}
+            {agent && isLimitState(task) && (
+              <Stamp tone={dom.tone} filled={dom.filled} size="sm">{taskStateLabel(task)}</Stamp>
+            )}
             <Typography sx={(t) => ({ fontSize: 10, color: t.nerv.hue.amber, fontFamily: t.nerv.fonts.mono, letterSpacing: '.06em' })}>
               #{task.id.slice(-4)}
             </Typography>
@@ -563,6 +566,9 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
             {agent
               ? <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>
               : (task.state && <Chip size="small" label={taskStateLabel(task)} sx={(t) => statePill(t)} />)}
+            {agent && isLimitState(task) && (
+              <Chip size="small" label={taskStateLabel(task)} sx={(t) => statePill(t)} />
+            )}
             <Typography variant="code" sx={{ fontSize: 12, color: 'text.disabled' }}>#{task.id.slice(-4)}</Typography>
             <Box sx={{ ml: 'auto' }}>
               <IconButton size="small" aria-label="Close" onClick={onClose}>
