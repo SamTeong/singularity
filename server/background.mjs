@@ -271,7 +271,7 @@ async function watchdog() {
   if (decision !== 'stop') return;
 
   injectedTaskId = task.id;
-  reg.input(task.sessionId, '\r' + WRAPUP + '\r');
+  reg.input(task.sessionId, '\r' + WRAPUP + '\r', { userInitiated: false });
   setTimeout(async () => {
     if (reg.isLive(task.sessionId)) {
       reg.kill(task.sessionId);

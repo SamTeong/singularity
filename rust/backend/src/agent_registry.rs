@@ -216,6 +216,10 @@ struct Agent {
     last_output: Option<i64>,
     decoder_carry: Vec<u8>,
     respawn_after_exit: Option<RespawnConfig>,
+    /// This agent's in-flight `respawn` attempt, armed before the codex lookup.
+    /// `kill`/`remove` clear it, so a lookup they interrupted cannot arm
+    /// `respawn_after_exit` afterwards (`agents.mjs:737-750`).
+    respawn_attempt: Option<u64>,
     remove_on_exit: bool,
     /// A `kill`/`remove`/`respawn` that arrived after the reservation but before
     /// the pty existed. Applied by `launch_reserved` the moment `port.spawn`
@@ -283,6 +287,8 @@ struct State {
     /// Per-id generation counter; strictly increasing, never reset
     /// (`rust-pty-backend.mjs:143`).
     generations: HashMap<String, u64>,
+    /// Token source for in-flight `respawn` attempts (`agents.mjs:740`).
+    respawn_attempts: u64,
     /// Fresh reservations accepted by `reserve_fresh` whose entry is not published
     /// yet. A lifecycle call that finds no entry records its intent here instead of
     /// being lost; Node's single synchronous turn can never observe the window.
@@ -393,8 +399,9 @@ enum Rollback {
 }
 
 /// Test seam: `create`/`reattach` announce that they entered the registry and
-/// that they hold the identity reservation, so concurrency tests can interleave
-/// two callers deterministically instead of relying on thread scheduling.
+/// that they hold the identity reservation, and `respawn` announces the two
+/// edges of its codex lookup, so concurrency tests can interleave callers
+/// deterministically instead of relying on thread scheduling.
 #[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InterleaveStage {
@@ -402,6 +409,10 @@ enum InterleaveStage {
     Enter,
     /// The call passed the duplicate guard and is about to register the spawn.
     Reserved,
+    /// `respawn` armed its cancel token and is about to run the codex lookup.
+    RespawnLookup,
+    /// The lookup returned; `respawn` is about to re-take the state lock and arm.
+    RespawnArm,
 }
 
 #[cfg(test)]
@@ -515,6 +526,7 @@ impl Registry {
                     last_output: None,
                     decoder_carry: Vec::new(),
                     respawn_after_exit: None,
+                    respawn_attempt: None,
                     remove_on_exit: false,
                     pending_lifecycle: None,
                 }),
@@ -1004,6 +1016,7 @@ impl Registry {
                 last_output: None,
                 decoder_carry: Vec::new(),
                 respawn_after_exit: None,
+                respawn_attempt: None,
                 remove_on_exit: false,
                 pending_lifecycle: None,
             };
@@ -1284,9 +1297,12 @@ impl Registry {
                 false
             } else {
                 // An explicit kill cancels a theme respawn queued by `respawn()`
-                // that has not fired yet (`agents.mjs:686`); `on_exit` would
-                // otherwise prefer the replacement.
+                // that has not fired yet (`agents.mjs:686`), and one still in its
+                // codex lookup (`:705`); `on_exit` would otherwise prefer the
+                // replacement.
                 // VERIFY: respawn-cancel-before-exit
+                // VERIFY: respawn-cancel-during-lookup
+                agent.respawn_attempt = None;
                 agent.respawn_after_exit = None;
                 if agent.pid.is_none() {
                     // Reserved, pty not spawned yet: a `port.kill` now addresses
@@ -1336,9 +1352,12 @@ impl Registry {
                 false
             } else {
                 agent.remove_on_exit = true;
-                // Same explicit cancel as `kill()`: a queued respawn must not
-                // outlive `remove()` (`agents.mjs:702`).
+                // Same explicit cancel as `kill()`, including a respawn still in
+                // its lookup (`agents.mjs:724`): a queued respawn must not outlive
+                // `remove()`.
                 // VERIFY: respawn-cancel-before-exit
+                // VERIFY: respawn-cancel-during-lookup
+                agent.respawn_attempt = None;
                 agent.respawn_after_exit = None;
                 if agent.pid.is_none() {
                     // Same reservation window as `kill`: the drop is armed now and
@@ -1371,25 +1390,50 @@ impl Registry {
     /// still live, arm `respawnAfterExit`, then kill — the exit resumes the same
     /// config. Returns false when the agent is not live.
     pub fn respawn(&self, id: &str) -> bool {
-        if !self.is_live(id) {
-            // `if (!a?.proc) return false` (`agents.mjs:611`): a detached entry and
-            // an id `create` has not published yet both have no live pty. A fresh
-            // reservation may still be refused, so recording an intent on its
-            // in-flight marker could answer `true` for a respawn the same `create`
-            // then discards; answer `false` and arm nothing, and let a `create` that
-            // does publish stand on its own. Node's single synchronous turn cannot
-            // observe the window either way.
-            // VERIFY: wave5-task-reg-5
-            // VERIFY: wave7-respawn_marker-1
-            return false;
-        }
+        // Node's per-attempt cancel token (`agents.mjs:737-750`), armed before the
+        // first await and compared after it: `kill`/`remove` clear the token, so a
+        // lookup they interrupted cannot arm `respawn_after_exit` afterwards.
+        let attempt = {
+            let mut state = self.state.lock().unwrap();
+            state.respawn_attempts += 1;
+            let attempt = state.respawn_attempts;
+            let Some(agent) = state.find_mut(id) else {
+                // `if (!a?.proc) return false` (`agents.mjs:611`): a detached entry
+                // and an id `create` has not published yet both have no live pty. A
+                // fresh reservation may still be refused, so recording an intent on
+                // its in-flight marker could answer `true` for a respawn the same
+                // `create` then discards; answer `false` and arm nothing, and let a
+                // `create` that does publish stand on its own. Node's single
+                // synchronous turn cannot observe the window either way.
+                // VERIFY: wave5-task-reg-5
+                // VERIFY: wave7-respawn_marker-1
+                return false;
+            };
+            if !agent.live {
+                return false;
+            }
+            agent.respawn_attempt = Some(attempt);
+            attempt
+        };
+        // VERIFY: respawn-cancel-during-lookup
+        #[cfg(test)]
+        self.interleave(id, InterleaveStage::RespawnLookup);
         let thread_id = self.remember_codex_thread(id);
+        #[cfg(test)]
+        self.interleave(id, InterleaveStage::RespawnArm);
         let spawned = {
             let mut state = self.state.lock().unwrap();
             let Some(agent) = state.find_mut(id) else {
                 return false;
             };
-            if !agent.live {
+            // A kill/remove that landed during the lookup cleared the token; one
+            // that armed a newer attempt keeps its own. A killed pty is still
+            // `live` until its exit, so the token is the only cancel signal here.
+            let current = agent.respawn_attempt == Some(attempt);
+            if current {
+                agent.respawn_attempt = None;
+            }
+            if !current || !agent.live {
                 return false;
             }
             agent.respawn_after_exit = Some(respawn_config_for(&agent.record, thread_id));
@@ -1464,13 +1508,20 @@ impl Registry {
     /// logged in Node and ignored here. Written input is announced on the bus
     /// so the task board can clear a limit overlay.
     pub fn input(&self, id: &str, data: &str) {
-        if self.is_live(id) {
-            let _ = self.port.write(id, data.as_bytes());
+        if self.write_input(id, data) {
             self.bus.emit(&BusEvent::Input {
                 id: id.to_owned(),
                 data: data.to_owned(),
             });
         }
+    }
+
+    pub(crate) fn write_input(&self, id: &str, data: &str) -> bool {
+        if self.is_live(id) {
+            let _ = self.port.write(id, data.as_bytes());
+            return true;
+        }
+        false
     }
 
     // VERIFY: registry-resize
@@ -2454,6 +2505,7 @@ mod tests {
                         state = gate.changed.wait_timeout(state, deadline - now).unwrap().0;
                     }
                 }
+                InterleaveStage::RespawnLookup | InterleaveStage::RespawnArm => {}
             })
         }
     }
@@ -2560,14 +2612,15 @@ mod tests {
             }
         }));
         registry.input("adapter-id", "later");
+        assert!(registry.write_input("adapter-id", "wrap up"));
         assert_eq!(
             *inputs.lock().unwrap(),
             [("adapter-id".to_owned(), "later".to_owned())],
-            "written input is announced on the bus"
+            "only user input is announced on the bus"
         );
         registry.resize("adapter-id", 100, 40);
         registry.kill("adapter-id").unwrap();
-        assert_eq!(port.write_count(), 1);
+        assert_eq!(port.write_count(), 2);
         assert_eq!(port.resize_count(), 1);
         assert_eq!(port.kills(), ["adapter-id"]);
 
@@ -3530,6 +3583,86 @@ mod tests {
 
         assert_eq!(port.spawn_count(), 1, "no replacement started");
         assert!(registry.snapshot().is_empty());
+    }
+
+    /// Run `respawn` on a codex agent and apply `op` at `stage` while it is in
+    /// flight, then deliver the killed pty's exit. Returns the respawn answer,
+    /// the spawn count and whether any entry survived, so a cancelled attempt and
+    /// a completed respawn are told apart.
+    fn respawn_interrupted_at(
+        stage: InterleaveStage,
+        op: Arc<dyn Fn(&Registry, &str) + Send + Sync>,
+    ) -> (bool, usize, bool) {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let id = "interrupted-respawn";
+        let mut input = create_input(&fixture, id, "gpt-5.3-codex-spark");
+        input.tool = Some("codex".to_owned());
+        registry.create(input).unwrap();
+        let weak = Arc::downgrade(&registry);
+        let fired = Arc::new(AtomicUsize::new(0));
+        set_interleave(
+            &registry,
+            Arc::new(move |hook_id: &str, hook_stage| {
+                if hook_stage == stage && fired.swap(1, Ordering::SeqCst) == 0 {
+                    let registry = weak.upgrade().expect("registry outlives the respawn");
+                    op(&registry, hook_id);
+                }
+            }),
+        );
+
+        let answer = registry.respawn(id);
+        exit(&registry, id, 1, Some(0));
+        (answer, port.spawn_count(), registry.snapshot().is_empty())
+    }
+
+    // A kill that lands while `respawn` walks the codex rollout tree (after its
+    // cancel token was armed, before it can arm `respawnAfterExit`) must win: the
+    // killed pty is still `live` until its exit, so only the token reports the
+    // cancel. Without it the exit would start a replacement the kill cancelled.
+    // VERIFY: respawn-cancel-during-lookup
+    #[test]
+    fn kill_cancels_a_respawn_during_its_codex_lookup() {
+        let (answer, spawns, empty) = respawn_interrupted_at(
+            InterleaveStage::RespawnLookup,
+            Arc::new(|registry: &Registry, id: &str| registry.kill(id).unwrap()),
+        );
+
+        assert!(!answer, "the interrupted attempt must not report a respawn");
+        assert_eq!(spawns, 1, "no replacement started");
+        assert!(empty);
+    }
+
+    // Same cancel for `remove` in the lookup: the entry must leave for good
+    // instead of being resumed by the interrupted attempt.
+    // VERIFY: respawn-cancel-during-lookup
+    #[test]
+    fn remove_cancels_a_respawn_during_its_codex_lookup() {
+        let (answer, spawns, empty) = respawn_interrupted_at(
+            InterleaveStage::RespawnLookup,
+            Arc::new(|registry: &Registry, id: &str| registry.remove(id).unwrap()),
+        );
+
+        assert!(!answer, "the interrupted attempt must not report a respawn");
+        assert_eq!(spawns, 1, "no replacement started");
+        assert!(empty);
+    }
+
+    // The pre-arm window: the lookup already returned and a kill lands before
+    // `respawn` takes the state lock again. The armed-then-cleared token is the
+    // only thing that stops this attempt from resurrecting the respawn.
+    // VERIFY: respawn-cancel-during-lookup
+    #[test]
+    fn kill_in_the_pre_arm_window_cancels_the_respawn() {
+        let (answer, spawns, empty) = respawn_interrupted_at(
+            InterleaveStage::RespawnArm,
+            Arc::new(|registry: &Registry, id: &str| registry.kill(id).unwrap()),
+        );
+
+        assert!(!answer, "the interrupted attempt must not report a respawn");
+        assert_eq!(spawns, 1, "no replacement started");
+        assert!(empty);
     }
 
     // agents.test.mjs:477-492.

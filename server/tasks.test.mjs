@@ -354,6 +354,108 @@ test('limit overlay: a persisted usage limit clears at its reset time, not befor
   assert.deepEqual(t.transitions, []);
 });
 
+// Leaving an overlay through an explicit real state must drop the rolling tail
+// too: the old phrase otherwise survives in the tail and the next output chunk
+// re-flags the card the agent just resumed.
+test('limit overlay: an explicit state change out of the overlay drops the stale tail', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'lim-exit-1', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r', sessionId: 'lim-sess-exit-1' }],
+    history: [],
+  }));
+  initTasks(null);
+  reg.bus.emit('output', { id: 'lim-sess-exit-1', data: 'reached your session usage limit' });
+  await waitForTask('lim-exit-1', (x) => x.state === 'usage-limited');
+
+  const t = await updateTask('lim-exit-1', { state: 'implementing' });
+  assert.equal(t.state, 'implementing');
+  assert.equal('limitPrevState' in t, false);
+  assert.equal('limitResetAt' in t, false);
+
+  reg.bus.emit('output', { id: 'lim-sess-exit-1', data: ' ' });
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(snapshotTasks().tasks.find((x) => x.id === 'lim-exit-1').state, 'implementing', 'the old phrase left with the tail');
+});
+
+// A column-only move to Done sets state 'complete', which ends the overlay —
+// the limit fields and the reset timer must not stay behind as stale metadata.
+test('limit overlay: a column-only move to done clears the limit metadata', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'lim-done-1', title: 'seed', description: 'd', column: 'inprogress', state: 'usage-limited', limitPrevState: 'implementing', limitResetAt: Date.now() + 3600_000, kind: 'plain', repo: '/r' }],
+    history: [],
+  }));
+  initTasks(null);
+  const t = await updateTask('lim-done-1', { column: 'done' });
+  assert.equal(t.state, 'complete');
+  assert.equal('limitPrevState' in t, false);
+  assert.equal('limitResetAt' in t, false);
+  const saved = JSON.parse(readFileSync(tasksFile, 'utf8')).tasks.find((x) => x.id === 'lim-done-1');
+  assert.equal('limitPrevState' in saved, false, 'stale metadata is not persisted');
+  assert.equal('limitResetAt' in saved, false);
+});
+
+// Rolling chunks: a plain 429 can land first and the usage phrase in a later
+// chunk. The overlay must upgrade, keep the covered state, and attach the reset
+// text from whichever chunk carried it.
+test('limit overlay: a plain 429 that later gains the usage phrase upgrades in place', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'lim-up-1', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r', sessionId: 'lim-sess-up-1' }],
+    history: [],
+  }));
+  initTasks(null);
+  reg.bus.emit('output', { id: 'lim-sess-up-1', data: 'API Error: Request rejected (429)' });
+  let t = await waitForTask('lim-up-1', (x) => x.state === 'rate-limited');
+  assert.equal(t.limitPrevState, 'working');
+
+  reg.bus.emit('output', { id: 'lim-sess-up-1', data: ' · you have reached your session usage limit · resets 3pm (UTC)' });
+  t = await waitForTask('lim-up-1', (x) => x.state === 'usage-limited');
+  assert.equal(t.state, 'usage-limited');
+  assert.equal(t.limitPrevState, 'working', 'the covered state survives the upgrade');
+  assert.ok(Number.isFinite(t.limitResetAt) && t.limitResetAt > Date.now());
+});
+
+test('limit overlay: reset text arriving after the phrase attaches the reset time', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'lim-reset-1', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r', sessionId: 'lim-sess-reset-1' }],
+    history: [],
+  }));
+  initTasks(null);
+  reg.bus.emit('output', { id: 'lim-sess-reset-1', data: 'reached your session usage limit' });
+  let t = await waitForTask('lim-reset-1', (x) => x.state === 'usage-limited');
+  assert.equal('limitResetAt' in t, false);
+
+  reg.bus.emit('output', { id: 'lim-sess-reset-1', data: ' · resets 3pm (UTC)' });
+  t = await waitForTask('lim-reset-1', (x) => Number.isFinite(x.limitResetAt));
+  assert.equal(t.state, 'usage-limited');
+  assert.equal(t.limitPrevState, 'working');
+  assert.ok(t.limitResetAt > Date.now());
+});
+
+// A user resume clears the overlay; the limit error Claude immediately reprints
+// must re-enter it. The stale check against the pre-clear state used to swallow
+// that fresh message.
+test('limit overlay: resume followed immediately by a fresh limit message keeps the fresh overlay', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'lim-race-1', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r', sessionId: 'lim-sess-race-1' }],
+    history: [],
+  }));
+  initTasks(null);
+  reg.bus.emit('output', { id: 'lim-sess-race-1', data: 'reached your session usage limit' });
+  reg.bus.emit('output', { id: 'lim-sess-race-1', data: 'paint '.repeat(100) });
+  await waitForTask('lim-race-1', (x) => x.state === 'usage-limited');
+
+  reg.bus.emit('input', { id: 'lim-sess-race-1', data: '\r' });
+  reg.bus.emit('output', { id: 'lim-sess-race-1', data: 'reached your session usage limit' });
+  await new Promise((r) => setTimeout(r, 150));
+  const t = snapshotTasks().tasks.find((x) => x.id === 'lim-race-1');
+  assert.equal(t.state, 'usage-limited', 'the fresh message outlives the resume clear');
+  assert.equal(t.limitPrevState, 'working');
+});
+
 // updateTask validates `state` against the per-column STATES map. Seeded
 // directly into tasks.json + initTasks() (mirrors agents.test.mjs's
 // seed-via-JSON + init() pattern) so this never goes through createTask's

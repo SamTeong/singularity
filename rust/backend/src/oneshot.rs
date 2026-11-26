@@ -1,7 +1,8 @@
 // One-shot CLI prompt execution for server/one-shot.mjs: runs a binary to
 // completion with a deadline and returns its captured stdout. Ports Node's
-// execFile semantics: stdin closed (Stdio::null = immediate EOF), windowsHide,
-// timeout kill, and the maxBuffer cap (ONESHOT_MAX_BUFFER parity; the caller
+// execFile semantics: stdin receives any supplied input and closes, with
+// immediate EOF when input is absent. Also applies windowsHide, timeout kill,
+// and the maxBuffer cap (ONESHOT_MAX_BUFFER parity; the caller
 // can raise it per exec — usagereport needs 16MB). Optional env entries are
 // set over the inherited environment (execFile's env replacement parity).
 use serde_json::{Value, json};

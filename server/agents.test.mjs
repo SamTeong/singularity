@@ -163,6 +163,35 @@ function seedDetached(id) {
 
 const claudeRoute = { isClaudeModel: true, isCodexModel: false };
 
+test('a live agent is published even when the registry save fails', async () => {
+  const id = '10000000-aaaa-bbbb-cccc-100000000005';
+  const backend = manualPtyBackend();
+  const tempFile = join(process.env.SINGULARITY_HOME, 'state', `agents.json.${process.pid}.tmp`);
+  const lists = [];
+  const onList = (list) => lists.push(list);
+  mkdirSync(tempFile);
+  registry.setPtyBackend(backend);
+  bus.on('list', onList);
+  try {
+    const pending = create({ cwd: scratch, title: 'unsaved', model: 'claude', sessionId: id, modelRoute: claudeRoute });
+    const rejection = assert.rejects(pending, /agents\.json write failed/);
+    await backend.waitForSpawn(1);
+    backend.release(0);
+    await rejection;
+    assert.equal(isLive(id), true);
+    assert.ok(lists.some((list) => list.some((agent) => agent.id === id)));
+  } finally {
+    bus.off('list', onList);
+    rmSync(tempFile, { recursive: true, force: true });
+    if (isLive(id)) {
+      remove(id);
+      backend.exit(0);
+      await waitForRemoval(id);
+    }
+    registry.setPtyBackend(ptyBackend);
+  }
+});
+
 test('registry activates early output after registration and contains async adapter errors', async () => {
   const id = '10000000-aaaa-bbbb-cccc-100000000002';
   let onData;
@@ -202,8 +231,9 @@ test('registry activates early output after registration and contains async adap
     const onInput = (event) => inputs.push(event);
     bus.on('input', onInput);
     input(id, 'later');
+    input(id, 'wrap up', { userInitiated: false });
     bus.off('input', onInput);
-    assert.deepEqual(inputs, [{ id, data: 'later' }], 'written input is announced on the bus');
+    assert.deepEqual(inputs, [{ id, data: 'later' }], 'only user input is announced on the bus');
     resize(id, 100, 40);
     kill(id);
     await new Promise((resolve) => setImmediate(resolve));

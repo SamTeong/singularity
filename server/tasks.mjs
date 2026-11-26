@@ -232,9 +232,19 @@ export function initTasks(log) {
     const tail = ((tails.get(id) || '') + stripAnsi(data)).slice(-RATE_LIMIT_TAIL_CHARS);
     tails.set(id, tail);
     const kind = classifyLimit(tail);
-    if (!kind || OVERLAY_STATES.includes(t.state)) return;
-    await serialized(() => updateTaskInner(t.id, { state: kind }, { limitResetAt: parseLimitResetAt(tail) }))
-      .catch((e) => logger?.warn({ err: e.message, id }, 'rate-limit update failed'));
+    if (!kind) return;
+    // Apply input and output in event order. A later output chunk can advance
+    // the tail without invalidating a limit already detected in it.
+    await serialized(() => {
+      const cur = tasks.get(tid);
+      if (!cur || cur.sessionId !== id || cur.column === 'done') return;
+      const resetAt = kind === 'usage-limited' ? parseLimitResetAt(tail) : null;
+      if (OVERLAY_STATES.includes(cur.state)) {
+        if (kind !== 'usage-limited') return;
+        if (cur.state === 'usage-limited' && (resetAt == null || cur.limitResetAt != null)) return;
+      }
+      return updateTaskInner(tid, { state: kind }, { limitResetAt: resetAt });
+    }).catch((e) => logger?.warn({ err: e.message, id }, 'rate-limit update failed'));
   });
   // Input to a limited session is a resume attempt: clear the overlay and drop
   // the stale tail. If the limit still holds, Claude reprints the phrase and
@@ -243,9 +253,11 @@ export function initTasks(log) {
   reg.bus.on('input', async ({ id, data }) => {
     const tid = taskBySession.get(id);
     const t = tid ? tasks.get(tid) : null;
-    if (!t || !OVERLAY_STATES.includes(t.state) || !stripAnsi(String(data))) return;
+    if (!t || t.column === 'done' || !stripAnsi(String(data))) return;
     tails.delete(id);
-    await serialized(() => clearLimitInner(t.id)).catch((e) => logger?.warn({ err: e.message, id }, 'limit clear failed'));
+    await serialized(() => {
+      if (tasks.get(tid)?.sessionId === id) return clearLimitInner(tid);
+    }).catch((e) => logger?.warn({ err: e.message, id }, 'limit clear failed'));
   });
 }
 
@@ -643,16 +655,21 @@ async function updateTaskInner(id, { column, state, actor, source, reason }, { l
     const s = String(state).slice(0, 120);
     const allowed = [...(STATES[col] ?? []), ...OVERLAY_STATES];
     if (!allowed.includes(s)) throw new Error(`bad state for ${col} (expected ${allowed.join('|')})`);
-    // Entering a limit overlay remembers the state it covers; any real state
-    // ends the overlay and its limit fields.
-    if (!OVERLAY_STATES.includes(s)) {
-      delete next.limitPrevState;
-      delete next.limitResetAt;
-    } else if (!OVERLAY_STATES.includes(t.state)) {
-      next.limitPrevState = t.state;
-      if (s === 'usage-limited' && limitResetAt != null) next.limitResetAt = limitResetAt;
-    }
     next.state = s;
+  }
+  // A limit overlay remembers the state it covers. Leaving it (any real state,
+  // or a column-only move such as Done's implicit 'complete') drops its fields
+  // and the session's stale output tail, so the old phrase cannot re-flag the
+  // card. A 429 that later gains the usage phrase upgrades in place, keeping
+  // limitPrevState.
+  const wasOverlay = OVERLAY_STATES.includes(t.state);
+  if (OVERLAY_STATES.includes(next.state)) {
+    if (!wasOverlay) next.limitPrevState = t.state;
+    if (next.state === 'usage-limited' && limitResetAt != null) next.limitResetAt = limitResetAt;
+  } else {
+    delete next.limitPrevState;
+    delete next.limitResetAt;
+    if (wasOverlay && next.sessionId) tails.delete(next.sessionId);
   }
   next.updatedAt = Date.now();
   const staged = new Map(tasks);

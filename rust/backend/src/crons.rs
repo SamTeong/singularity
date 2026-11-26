@@ -10,6 +10,9 @@
 //!   keeps its valid siblings. Pre-rename records (`name`/`prompt`, `1fa8003`)
 //!   are normalised to `title`/`description`. Unreadable records are carried
 //!   through writes without being scheduled.
+//! - A repaired `crons.json` is retried under the scheduler lock by the next
+//!   mutation or tick, so enabled jobs resume without a cron edit; the failed
+//!   load leaves memory empty, so the retry cannot clobber anything.
 //! - Every mutation is staged first: build the new job vector, serialise
 //!   `{"crons":[…]}` with 2-space pretty JSON, write atomically, and only on a
 //!   successful write swap it into memory. A failed write leaves memory
@@ -394,7 +397,12 @@ impl CronsService {
         let records = match self.read_records() {
             Ok(records) => records,
             Err(error) => {
-                eprintln!("crons.json load failed: {error}");
+                // Only log when the failure changes: a tick retries a blocked
+                // load every second, and the same unreadable bytes must not
+                // reprint this line each time.
+                if unreadable.as_ref().err() != Some(&error) {
+                    eprintln!("crons.json load failed: {error}");
+                }
                 *unreadable = Err(error);
                 return false;
             }
@@ -417,7 +425,8 @@ impl CronsService {
     }
 
     // VERIFY: crons-load-retry
-    /// Retry under the scheduler lock before staging a mutation.
+    /// Retry under the scheduler lock before staging a mutation or computing a
+    /// tick's due jobs.
     fn retry_unreadable_load(&self) {
         let blocked = self.unreadable_jobs.lock().unwrap().is_err();
         if blocked && self.load() {
@@ -624,6 +633,16 @@ impl CronsService {
         // abort reaches: a body that started before `shutdown` must not fire.
         if self.stopped.load(Ordering::SeqCst) {
             return;
+        }
+        // VERIFY: crons-load-retry-tick
+        // A repaired file must re-enter the schedule on a normal tick, with no
+        // cron mutation. The blocked load left memory empty, so the retry has
+        // nothing to clobber; the scheduler lock keeps it from interleaving
+        // with a CRUD change.
+        let blocked = self.unreadable_jobs.lock().unwrap().is_err();
+        if blocked {
+            let _serial = self.scheduler.lock().unwrap();
+            self.retry_unreadable_load();
         }
         let due: Vec<String> = {
             let state = self.state.lock().unwrap();
@@ -2104,6 +2123,66 @@ mod tests {
         );
         let created_id = created["id"].as_str().unwrap();
         assert_eq!(job(&stored["crons"], created_id)["title"], json!("new"));
+    }
+
+    // VERIFY: crons-load-retry-tick-test
+    #[test]
+    fn a_tick_recovers_enabled_jobs_after_the_file_is_repaired() {
+        let fixture = Fixture::new();
+        fs::write(fixture.state_file(), b"not json").unwrap();
+        let (service, _, _, bus) = fixture.setup();
+        service.init(None);
+        let events = subscribe_events(&bus);
+
+        // While the document is unreadable a tick retries, schedules nothing
+        // and publishes nothing.
+        service.tick(fixture.now());
+        assert!(jobs(&service.snapshot_value()).is_empty());
+        assert!(fixture.port.spawns.lock().unwrap().is_empty());
+        assert!(events.lock().unwrap().is_empty());
+
+        let repaired = json!({"crons": [
+            {
+                "id": "recovered", "title": "recovered", "enabled": true,
+                "cronExpr": "* * * * *", "description": "p", "cwd": fixture.repo(),
+                "model": "claude", "scopes": [], "permissionMode": "acceptEdits",
+                "lastSessionId": null, "lastFiredAt": null, "createdAt": 1, "updatedAt": 1
+            },
+            {"id": "unknown", "nonsense": true}
+        ]});
+        fs::write(
+            fixture.state_file(),
+            serde_json::to_string_pretty(&repaired).unwrap(),
+        )
+        .unwrap();
+
+        // The repair alone makes the enabled job schedulable again.
+        service.tick(fixture.now());
+        let snapshot = service.snapshot_value();
+        assert!(
+            job(&snapshot, "recovered")["nextFire"].is_string(),
+            "the tick load schedules the repaired enabled job"
+        );
+        assert_eq!(
+            events.lock().unwrap().len(),
+            1,
+            "the recovery publishes the repaired list"
+        );
+
+        // And the next due tick fires it, still with no cron mutation.
+        service.tick(fixture.advance(61_000));
+        assert_eq!(fixture.port.spawns.lock().unwrap().len(), 1);
+        assert!(job(&service.snapshot_value(), "recovered")["lastSessionId"].is_string());
+
+        let stored: Value =
+            serde_json::from_str(&fs::read_to_string(fixture.state_file()).unwrap()).unwrap();
+        assert!(
+            stored["crons"]
+                .as_array()
+                .unwrap()
+                .contains(&repaired["crons"][1]),
+            "the unknown row is retained on the fire's write"
+        );
     }
 
     // VERIFY: crons-load-legacy

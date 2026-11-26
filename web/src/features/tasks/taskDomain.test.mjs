@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COLUMNS, COLUMN_DOMAIN, cardDomainId, firstEnteredAt, taskStateLabel } from './taskDomain.js';
+import { COLUMNS, COLUMN_DOMAIN, cardDomainId, firstEnteredAt, isLimitState, taskStateLabel } from './taskDomain.js';
 // Relative, not the `@/` alias — Node's test runner doesn't resolve it (see
 // theme/resolveSkin.js's doc comment for the same note).
 import { DOMAIN_STATE } from '../../lib/domainState.js';
@@ -69,4 +69,19 @@ test('taskStateLabel appends the local reset time to a usage limit only', () => 
   assert.equal(taskStateLabel({ state: 'usage-limited' }), 'usage-limited');
   assert.equal(taskStateLabel({ state: 'rate-limited', limitResetAt: resetAt }), 'rate-limited');
   assert.equal(taskStateLabel({ state: 'implementing' }), 'implementing');
+});
+
+test('taskStateLabel adds an unambiguous local date when the reset falls on a later day', () => {
+  const now = new Date(2026, 0, 10, 23, 30).getTime();
+  const sameDay = new Date(2026, 0, 10, 23, 55).getTime();
+  const nextDay = new Date(2026, 0, 11, 4, 5).getTime();
+  assert.equal(taskStateLabel({ state: 'usage-limited', limitResetAt: sameDay }, now), 'usage-limited · resets 23:55');
+  assert.equal(taskStateLabel({ state: 'usage-limited', limitResetAt: nextDay }, now), 'usage-limited · resets 2026-01-11 04:05');
+});
+
+test('isLimitState covers both overlay limit states only', () => {
+  assert.equal(isLimitState({ state: 'usage-limited' }), true);
+  assert.equal(isLimitState({ state: 'rate-limited' }), true);
+  assert.equal(isLimitState({ state: 'implementing' }), false);
+  assert.equal(isLimitState({}), false);
 });

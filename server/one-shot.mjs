@@ -26,10 +26,10 @@ let oneShotBackend;
 export function setOneShotBackend(backend) { oneShotBackend = backend; }
 
 // Default executor for runOneShotPrompt: the queued Rust backend when index.mjs
-// wires it in (std::process::Command, stdin-null + windowsHide + timeout parity);
+// wires it in (std::process::Command with Windows hiding and timeout parity);
 // the legacy in-process execFile otherwise, so standalone imports keep working.
 export async function oneShotSpawn(bin, args, opts = {}) {
-  if (!oneShotBackend) return execFileP(bin, args, opts);
+  if (!oneShotBackend) return run(execFileP, bin, args, opts);
   return oneShotBackend.oneShot(bin, args, opts);
 }
 
@@ -38,7 +38,10 @@ export async function oneShotSpawn(bin, args, opts = {}) {
 // prompt (opts.input) and close it.
 function run(spawn, bin, args, opts) {
   const p = spawn(bin, args, opts);
-  p.child?.stdin?.end(opts.input);
+  const stdin = p.child?.stdin;
+  // A child can exit before reading the prompt. Preserve its exit result.
+  stdin?.on?.('error', () => {});
+  stdin?.end(opts.input);
   return p;
 }
 
@@ -62,7 +65,12 @@ export async function runOneShotPrompt(group, modelId, prompt, {
       let envelope = null;
       try { envelope = JSON.parse(stdout); } catch { /* not JSON */ }
       // claude can exit 0 with an error envelope (e.g. a usage limit).
-      if (envelope?.is_error === true) throw new Error(envelope.result || envelope.subtype || 'claude one-shot failed');
+      if (envelope?.is_error === true) {
+        const { result, subtype } = envelope;
+        const reason = typeof result === 'string' ? result : '';
+        const fallback = typeof subtype === 'string' && subtype !== 'success' ? subtype : '';
+        throw new Error(reason || fallback || 'claude one-shot failed');
+      }
       if (!includeMetadata) return stdout;
       return { answer: stdout, usage: envelope?.usage ?? null };
     } catch (e) {

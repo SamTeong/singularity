@@ -41,18 +41,34 @@ export const COLUMN_DOMAIN = Object.fromEntries(COLUMN_DEFS.map((c) => [c.id, c.
 export const cardDomainId = (task, agent) =>
   agent ? (KIND_TO_DOMAIN[KIND[agent.status]] ?? 'review') : (COLUMN_DOMAIN[task.column] ?? 'queued');
 
+/** Overlay limit states — a task keeps its column and agent, so its badge
+ *  must show alongside an attached agent's pill (server/tasks.mjs
+ *  OVERLAY_STATES). */
+const LIMIT_STATES = ['usage-limited', 'rate-limited'];
+
+/** @param {{ state?: string }} task */
+export const isLimitState = (task) => LIMIT_STATES.includes(task.state);
+
 /**
  * The task-state text a badge shows: `task.state`, plus the local reset
  * wall-clock for a Claude usage limit when the daemon parsed one
- * (server/tasks.mjs limitResetAt).
+ * (server/tasks.mjs limitResetAt). A reset on a later local day carries an
+ * unambiguous `YYYY-MM-DD` so it is not read as today (or already past).
  * @param {{ state?: string, limitResetAt?: number }} task
+ * @param {number} [now] epoch ms, injectable for tests
  * @returns {string|undefined}
  */
-export const taskStateLabel = (task) => {
+export const taskStateLabel = (task, now = Date.now()) => {
   if (task.state !== 'usage-limited' || typeof task.limitResetAt !== 'number') return task.state;
+  const pad = (n) => String(n).padStart(2, '0');
   const d = new Date(task.limitResetAt);
-  const hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  return `usage-limited · resets ${hhmm}`;
+  const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const resetDay = new Date(d);
+  resetDay.setHours(0, 0, 0, 0);
+  const date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return `usage-limited · resets ${resetDay > today ? `${date} ${clock}` : clock}`;
 };
 
 /**

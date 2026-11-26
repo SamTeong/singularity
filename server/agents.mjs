@@ -264,6 +264,10 @@ export function livePids() {
 }
 
 function emitList() { bus.emit('list', snapshot()); }
+
+function persistAndEmitList() {
+  try { persist(); } finally { emitList(); }
+}
 // Single transition point for agent status. Tracks activeMs (persisted, wall
 // time spent 'running') across the running <-> idle/exited/detached edges.
 function setStatus(a, status) {
@@ -528,8 +532,7 @@ export async function create({ cwd, title, model, scopes, sessionId, prompt, per
     agents.set(id, a);
     wire(a);
     rememberRepo(cwd);
-    persist();
-    emitList();
+    persistAndEmitList();
     return a;
   });
 }
@@ -581,8 +584,7 @@ export async function reattach(id) {
       if (canceled.has(id)) { discardProc(proc, id); throw new Error('session was removed during spawn'); }
       a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
       wire(a);
-      persist();
-      emitList();
+      persistAndEmitList();
       return a;
     } catch (error) {
       // VERIFY: reattach-failure-exit-cleanup
@@ -666,11 +668,11 @@ export async function fork(srcId, title) {
   return await create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId, tool: src.tool });
 }
 
-export function input(id, data) {
+export function input(id, data, { userInitiated = true } = {}) {
   const proc = agents.get(id)?.proc;
   if (!proc) return;
   void proc.write(data).catch((error) => logger?.warn({ err: error.message, id }, 'agent input failed'));
-  bus.emit('input', { id, data }); // tasks.mjs: input to a limited session clears its overlay
+  if (userInitiated) bus.emit('input', { id, data }); // task-limit resume attempt
 }
 export function resize(id, cols, rows) {
   try { const result = agents.get(id)?.proc?.resize(cols, rows); result?.catch(() => {}); } catch {}
@@ -707,8 +709,7 @@ export function kill(id) {
   if (a.proc) { a.respawnAfterExit = null; killPty(a.proc, id); return; } // onExit -> status exited + persist
   cancelPending(id); // pending reattach: discard the pty it is about to attach
   agents.delete(id);
-  persist();
-  emitList();
+  persistAndEmitList();
 }
 
 // Remove an agent from the registry entirely: a live pty is killed and the
@@ -724,8 +725,7 @@ export function remove(id) {
   if (a.proc) { a.respawnAfterExit = null; a.removeOnExit = true; killPty(a.proc, id); return; } // onExit -> delete
   cancelPending(id); // pending reattach: discard the pty it is about to attach
   agents.delete(id);
-  persist();
-  emitList();
+  persistAndEmitList();
 }
 
 // Respawn one live agent: kill it, and its onExit resumes with the same config
