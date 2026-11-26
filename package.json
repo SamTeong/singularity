@@ -22,6 +22,7 @@
     "lint": "eslint .",
     "test": "node scripts/build-rust-backend.mjs && node --test --test-force-exit \"server/*.test.mjs\" \"web/src/**/*.test.mjs\" \"scripts/*.test.mjs\" \".claude/skills/harness-usage-report/scripts/*.test.mjs\"",
     "test:changed": "node scripts/test-changed.mjs",
+    "check:instructions": "node scripts/check-instructions.mjs",
     "test:usage-report:idle": "node .claude/skills/harness-usage-report/scripts/idle-renderer-check.mjs",
     "test:e2e": "vite build --config web/vite.config.mjs && playwright test",
     "test:e2e:ui": "playwright test --ui",
