@@ -295,6 +295,11 @@ struct State {
     // VERIFY: wave5-task-reg-1
     reserving: HashMap<String, PrePublishIntent>,
     draining: bool,
+    // VERIFY: registry-exiting-ring
+    /// The ring of an entry `on_exit` just removed, kept only while its
+    /// `Exited` status is delivered. Node deletes the record after the status
+    /// event, so `getBuf` still answers there (cron run tails rely on it).
+    exiting: HashMap<String, String>,
 }
 
 impl State {
@@ -568,11 +573,11 @@ impl Registry {
     // VERIFY: registry-buf
     /// `getBuf` (`agents.mjs:130`): the ring, concatenated.
     pub fn get_buf(&self, id: &str) -> String {
-        self.state
-            .lock()
-            .unwrap()
+        let state = self.state.lock().unwrap();
+        state
             .find(id)
             .map(|agent| agent.ring.concat())
+            .or_else(|| state.exiting.get(id).cloned())
             .unwrap_or_default()
     }
 
@@ -1719,13 +1724,17 @@ impl Registry {
                 }
             };
             if remove {
-                state.remove(id);
+                let removed = state.remove(id);
+                if let (Some(removed), ExitAction::Bannered(_)) = (removed, &action) {
+                    state.exiting.insert(id.to_owned(), removed.ring.concat());
+                }
             }
             action
         };
         for event in &events {
             self.bus.emit(event);
         }
+        self.state.lock().unwrap().exiting.remove(id);
         match action {
             ExitAction::Drained => {}
             ExitAction::Removed => {

@@ -183,7 +183,14 @@ function seedState() {
     cwd: SCRATCH_DIR, model: 'claude', scopes: [], permissionMode: 'acceptEdits',
     lastSessionId: null, lastFiredAt: null, nextAt: null, createdAt: T0, updatedAt: T0,
   });
-  json(join(STATE_DIR, 'crons.json'), { crons: [cron(1, 'Nightly fixture sweep', '0 4 1 1 *'), cron(2, 'Weekly fixture digest', '0 5 1 1 *')] });
+  // The digest carries a finished run's outcome (mirrors web/src/mock/fixtures.js).
+  const digest = {
+    ...cron(2, 'Weekly fixture digest', '0 5 1 1 *'),
+    lastSessionId: sessionId(2102), lastFiredAt: T0 - 600_000,
+    lastRunEndedAt: T0 - 480_000, lastRunEnd: 'idle', lastRunDurationMs: 120_000,
+    lastRunTail: 'Invalid API key · Please run /login\n> ',
+  };
+  json(join(STATE_DIR, 'crons.json'), { crons: [cron(1, 'Nightly fixture sweep', '0 4 1 1 *'), digest] });
 
   const bgJob = (i, title) => ({
     id: sessionId(3000 + i), title, description: `${title} — seeded fixture job.`, cwd: SCRATCH_DIR,

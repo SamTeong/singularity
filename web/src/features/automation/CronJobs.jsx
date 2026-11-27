@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
@@ -57,6 +57,16 @@ const fmtNext = (iso) => {
   if (h < 24) return `in ${h}h`;
   return new Date(iso).toLocaleString();
 };
+const fmtDuration = (ms) => {
+  if (ms == null) return '—';
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+};
+// Cron run end reason (lastRunEnd) as shown in the Last fired cell.
+const RUN_END_LABEL = { idle: 'went idle', exited: 'exited' };
 const fmtHM = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const fmtWait = (nextDueAt) => `First check in about ${Math.max(0, Math.ceil((nextDueAt - Date.now()) / 60000))} minutes`;
 
@@ -66,6 +76,8 @@ const fmtWait = (nextDueAt) => `First check in about ${Math.max(0, Math.ceil((ne
 export default function CronJobs({ crons, agents, background, recent, cwd, setCwd, onBrowse, onAdd, onEdit, onToast }) {
   // false (closed) | true (create) | a job object (edit that row)
   const [jobOpen, setJobOpen] = useState(false);
+  // Scheduled row whose last-run output tail is expanded (one at a time).
+  const [tailId, setTailId] = useState(null);
   // Background section subview: 'tasks' (jobs table, default) | 'reports'.
   const [bgView, setBgView] = useState('tasks');
   const [reports, setReports] = useState([]);
@@ -268,8 +280,10 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
             <TableBody>
               {crons.map((j) => {
                 const agent = agents.find((a) => a.id === j.lastSessionId);
+                const tailOpen = tailId === j.id && !!j.lastRunTail;
                 return (
-                  <TableRow key={j.id}>
+                  <Fragment key={j.id}>
+                  <TableRow>
                     <TableCell padding="checkbox">
                       <Tooltip title={j.enabled ? 'Disable' : 'Enable'} disableInteractive>
                         <Switch size="small" checked={!!j.enabled} onChange={() => toggle(j.id, j.enabled)} />
@@ -294,6 +308,16 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                           <Typography variant="caption" sx={{ color: 'error.main', display: 'block' }} noWrap>{j.lastError}</Typography>
                         </Tooltip>
                       )}
+                      {j.lastRunEnd && (
+                        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }} noWrap>
+                          {`${RUN_END_LABEL[j.lastRunEnd] ?? j.lastRunEnd} ${fmtRel(j.lastRunEndedAt)} · ran ${fmtDuration(j.lastRunDurationMs)}`}
+                        </Typography>
+                      )}
+                      {j.lastRunTail && (
+                        <Button size="small" aria-expanded={tailOpen} onClick={() => setTailId(tailOpen ? null : j.id)} sx={{ p: 0, minWidth: 0, fontSize: 11 }}>
+                          {tailOpen ? 'Hide output' : 'Show output'}
+                        </Button>
+                      )}
                     </TableCell>
                     <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{j.nextFire ? fmtNext(j.nextFire) : '—'}</Typography></TableCell>
                     <TableCell>{agent ? <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill> : <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>—</Typography>}</TableCell>
@@ -311,6 +335,16 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                       </Stack>
                     </TableCell>
                   </TableRow>
+                  {tailOpen && (
+                    <TableRow>
+                      <TableCell colSpan={10}>
+                        <Box component="pre" sx={{ m: 0, maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace', fontSize: 11 }}>
+                          {j.lastRunTail}
+                        </Box>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  </Fragment>
                 );
               })}
             </TableBody>

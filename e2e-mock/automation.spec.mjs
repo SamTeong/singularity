@@ -89,6 +89,18 @@ test('scheduled: live cron validation, POST, Edit prefilled, Delete; seeded enab
   expect(await fetchCalls(page)).toContain('POST /api/crons/' + CRON_1_ID);
 });
 
+test('scheduled: seeded last run shows end reason and duration; its output tail expands and collapses', async ({ page }) => {
+  await gotoUrl(page, 'Automation');
+  const row = page.locator('tr').filter({ hasText: 'Weekly fixture digest' });
+  await expect(row.getByText(/went idle .* · ran 2m 0s/)).toBeVisible();
+  const tail = page.locator('pre').filter({ hasText: 'Please run /login' });
+  await expect(tail).toHaveCount(0);
+  await row.getByRole('button', { name: 'Show output' }).click();
+  await expect(tail).toBeVisible();
+  await row.getByRole('button', { name: 'Hide output' }).click();
+  await expect(tail).toHaveCount(0);
+});
+
 test('background: create, Edit PATCH, Delete; enable Switch; drag reorder; Jobs/Reports toggle', async ({ page }) => {
   await gotoUrl(page, 'Automation');
   await recordFetchCalls(page);

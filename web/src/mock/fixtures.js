@@ -221,7 +221,15 @@ function cron(i, title, expr) {
 }
 
 export function seedCrons() {
-  return [cron(1, 'Nightly fixture sweep', '0 4 1 1 *'), cron(2, 'Weekly fixture digest', '0 5 1 1 *')];
+  // The digest carries a finished run so the Last fired cell shows its outcome
+  // (end reason, duration, expandable output tail), as the daemon records it.
+  const digest = {
+    ...cron(2, 'Weekly fixture digest', '0 5 1 1 *'),
+    lastSessionId: sessionId(2102), lastFiredAt: T0 - 600_000,
+    lastRunEndedAt: T0 - 480_000, lastRunEnd: 'idle', lastRunDurationMs: 120_000,
+    lastRunTail: 'Invalid API key · Please run /login\n> ',
+  };
+  return [cron(1, 'Nightly fixture sweep', '0 4 1 1 *'), digest];
 }
 
 function bgJob(i, title) {
