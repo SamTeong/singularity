@@ -110,7 +110,32 @@ pub struct CronJob {
     pub pending_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_run_at: Option<i64>,
+    // VERIFY: crons-run-outcome-fields
+    /// Outcome of the run `lastSessionId` names (`recordRunEnd`, `crons.mjs`).
+    /// Omitted until that run ends; a new run clears them ([`CronJob::clear_run_outcome`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_ended_at: Option<i64>,
+    /// `"idle"` (auto-killed after sustained idle) or `"exited"` (ended by itself).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_end: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_duration_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_tail: Option<String>,
 }
+
+impl CronJob {
+    /// `clearRunOutcome` (`crons.mjs`): a new `lastSessionId` drops the old outcome.
+    fn clear_run_outcome(&mut self) {
+        self.last_run_ended_at = None;
+        self.last_run_end = None;
+        self.last_run_duration_ms = None;
+        self.last_run_tail = None;
+    }
+}
+
+/// `RUN_TAIL_CHARS` (`crons.mjs`): visible tail kept in `lastRunTail`.
+const RUN_TAIL_CHARS: usize = 2048;
 
 #[derive(Default)]
 struct State {
@@ -308,6 +333,8 @@ pub struct CronsService {
     /// The token is what `arm` returned, so `expire_idle` can tell its own arm
     /// from a newer one re-armed by `idle` after an intervening `running`.
     armed: Mutex<HashMap<String, u64>>,
+    /// Session ids `expire_idle` killed (`idleKilled`): their `Exited` is an idle end.
+    idle_killed: Mutex<HashSet<String>>,
     timers: Arc<dyn TimerPort>,
     /// VERIFY: wave3-fix-crons-1
     /// Serializes the whole run-record path (overlap check → `begin_run` →
@@ -354,6 +381,7 @@ impl CronsService {
             state: Mutex::new(State::default()),
             sessions: Mutex::new(HashSet::new()),
             armed: Mutex::new(HashMap::new()),
+            idle_killed: Mutex::new(HashSet::new()),
             timers,
             scheduler: Mutex::new(()),
             persist_calls: AtomicU64::new(0),
@@ -470,6 +498,7 @@ impl CronsService {
                 job.last_session_id = Some(agent.id.clone());
                 job.last_fired_at = pending_at;
                 job.updated_at = now;
+                job.clear_run_outcome();
                 job.pending_run_id = None;
                 job.pending_run_at = None;
             }
@@ -759,6 +788,7 @@ impl CronsService {
             job.last_fired_at = Some(now);
             job.updated_at = now;
             job.last_error = None;
+            job.clear_run_outcome();
             job.pending_run_id = None;
             job.pending_run_at = None;
         }
@@ -860,6 +890,7 @@ impl CronsService {
             job.last_session_id = Some(agent.id);
             job.last_fired_at = Some(now);
             job.updated_at = now;
+            job.clear_run_outcome();
         }
         // Persist **with pending still on disk**, then clear it in memory only.
         let staged = state.jobs.clone();
@@ -957,6 +988,10 @@ impl CronsService {
             last_error: None,
             pending_run_id: None,
             pending_run_at: None,
+            last_run_ended_at: None,
+            last_run_end: None,
+            last_run_duration_ms: None,
+            last_run_tail: None,
         };
         let idempotency_payload = job
             .idempotency_key
@@ -1115,7 +1150,9 @@ impl CronsService {
     }
 
     // VERIFY: crons-idle-kill
-    /// The `status` listener body (`crons.mjs:99-112`). Must never take `state`.
+    /// The `status` listener body (`crons.mjs:99-112`). Must never take `state`,
+    /// except `Exited` via [`CronsService::record_run_end`]: the registry emits it
+    /// from `on_exit` with no registry lock held and never from inside `create`.
     pub fn on_status(&self, id: &str, status: Status) {
         if !self.sessions.lock().unwrap().contains(id) {
             return;
@@ -1145,11 +1182,48 @@ impl CronsService {
                     self.timers.cancel(id);
                 }
                 self.sessions.lock().unwrap().remove(id);
+                let idle = self.idle_killed.lock().unwrap().remove(id);
+                self.record_run_end(id, if idle { "idle" } else { "exited" });
                 // `on_exit` already removed the entry, so this is usually a
                 // no-op; kept for the `remove_on_exit` edge and structural parity.
                 let _ = self.registry.kill(id);
             }
             Status::Starting | Status::Detached => {}
+        }
+    }
+
+    // VERIFY: crons-run-outcome
+    /// `recordRunEnd` (`crons.mjs`): stamp the end, reason, duration and the
+    /// ANSI-stripped output tail on the job whose `lastSessionId` is `session`,
+    /// persist staged and emit only on a successful write. A session no job
+    /// names (job deleted) is ignored. `get_buf` still answers while `Exited`
+    /// is delivered (`Registry::on_exit` keeps the removed ring until then).
+    fn record_run_end(&self, session: &str, end: &str) {
+        let tail = run_tail(&self.registry.get_buf(session));
+        let now = (self.config.clock)();
+        let mut state = self.state.lock().unwrap();
+        let Some(index) = state
+            .jobs
+            .iter()
+            .position(|job| job.last_session_id.as_deref() == Some(session))
+        else {
+            return;
+        };
+        let mut staged = state.jobs.clone();
+        let job = &mut staged[index];
+        job.last_run_ended_at = Some(now);
+        job.last_run_end = Some(end.to_owned());
+        job.last_run_duration_ms = job.last_fired_at.map(|fired| now - fired);
+        job.last_run_tail = Some(tail);
+        match self.persist(&staged) {
+            Ok(()) => {
+                state.jobs = staged;
+                drop(state);
+                self.emit();
+            }
+            Err(error) => {
+                eprintln!("cron run outcome persistence failed: {}", error.message());
+            }
         }
     }
 
@@ -1176,6 +1250,8 @@ impl CronsService {
         if !self.sessions.lock().unwrap().contains(id) {
             return;
         }
+        // Marked before the kill: its `Exited` may arrive synchronously.
+        self.idle_killed.lock().unwrap().insert(id.to_owned());
         let _ = self.registry.kill(id);
     }
 
@@ -1234,6 +1310,18 @@ fn parse_cron_job(record: &Value) -> Result<CronJob, String> {
         return Err("expected a non-empty id".to_owned());
     }
     Ok(job)
+}
+
+/// `stripAnsi(buf).slice(-RUN_TAIL_CHARS).trim()` (`crons.mjs`). Counts chars,
+/// where JS counts UTF-16 units; only astral characters can differ.
+fn run_tail(buf: &str) -> String {
+    let visible = crate::task_service::strip_ansi(buf);
+    let start = visible
+        .char_indices()
+        .rev()
+        .nth(RUN_TAIL_CHARS - 1)
+        .map_or(0, |(index, _)| index);
+    visible[start..].trim().to_owned()
 }
 
 fn wire_value(job: &CronJob, next_fire: Option<i64>) -> Value {
@@ -2352,6 +2440,102 @@ mod tests {
         let armed_before = timers.armed.lock().unwrap().len();
         service.on_status("other", Status::Idle);
         assert_eq!(timers.armed.lock().unwrap().len(), armed_before);
+    }
+
+    // VERIFY: crons-run-outcome-test
+    /// Idle auto-kill and self-exit both stamp the outcome of `lastSessionId`'s
+    /// run (tail read from the registry ring while `Exited` is delivered), and
+    /// the next run clears it; a deleted job's session is ignored.
+    #[test]
+    fn a_run_end_records_idle_or_exited_and_the_next_run_clears_it() {
+        use crate::pty::PtyEvent;
+        let fixture = Fixture::new();
+        let (service, timers, registry, bus) = fixture.setup();
+        service.init(None);
+        let events = subscribe_events(&bus);
+        let mut spec = body(&fixture, "outcome");
+        spec["enabled"] = json!(false);
+        let id = service.create(&spec, None).unwrap()["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let output = |session: &str, text: &str| {
+            registry.on_pty_event(PtyEvent::Output {
+                id: session.to_owned(),
+                generation: 1,
+                bytes: text.as_bytes().to_vec(),
+            });
+        };
+        let exit = |session: &str| {
+            registry.on_pty_event(PtyEvent::Exit {
+                id: session.to_owned(),
+                generation: 1,
+                exit_code: None,
+            });
+        };
+        let fields = [
+            "lastRunEndedAt",
+            "lastRunEnd",
+            "lastRunDurationMs",
+            "lastRunTail",
+        ];
+
+        // Idle: the confirm timer kills, then the pty exits.
+        let first = service.run(&id).unwrap()["id"].as_str().unwrap().to_owned();
+        output(
+            &first,
+            &format!("{}\x1b[31mlogin expired\x1b[0m\r\n  ", "x".repeat(3000)),
+        );
+        fixture.advance(5000);
+        service.on_status(&first, Status::Idle);
+        let generation = timers.armed.lock().unwrap().last().unwrap().1;
+        service.expire_idle(&first, generation);
+        events.lock().unwrap().clear();
+        exit(&first);
+        let snapshot = service.snapshot_value();
+        let ended = job(&snapshot, &id);
+        assert_eq!(ended["lastRunEnd"], json!("idle"));
+        assert_eq!(ended["lastRunEndedAt"], json!(fixture.now()));
+        assert_eq!(ended["lastRunDurationMs"], json!(5000));
+        let tail = ended["lastRunTail"].as_str().unwrap();
+        assert!(
+            tail.ends_with("login expired"),
+            "stripped and trimmed: {tail:?}"
+        );
+        assert!(!tail.contains('\x1b'));
+        // Sliced to the last RUN_TAIL_CHARS visible chars, then trimmed.
+        assert_eq!(tail.chars().count(), RUN_TAIL_CHARS - "\r\n  ".len());
+        let stored: Value =
+            serde_json::from_str(&fs::read_to_string(fixture.state_file()).unwrap()).unwrap();
+        assert_eq!(stored["crons"][0]["lastRunEnd"], json!("idle"));
+        assert_eq!(events.lock().unwrap().len(), 1, "one crons snapshot");
+
+        // The next run clears all four fields; its self-exit records `exited`.
+        let second = service.run(&id).unwrap()["id"].as_str().unwrap().to_owned();
+        let snapshot = service.snapshot_value();
+        let rerun = job(&snapshot, &id);
+        assert_eq!(rerun["lastSessionId"], json!(second));
+        for field in fields {
+            assert!(rerun.get(field).is_none(), "{field} cleared");
+        }
+        output(&second, "crashed");
+        exit(&second);
+        let snapshot = service.snapshot_value();
+        let ended = job(&snapshot, &id);
+        assert_eq!(ended["lastRunEnd"], json!("exited"));
+        assert_eq!(ended["lastRunTail"], json!("crashed"));
+        assert_eq!(ended["lastRunDurationMs"], json!(0));
+
+        // A session whose job was deleted is ignored.
+        let third = service.run(&id).unwrap()["id"].as_str().unwrap().to_owned();
+        service.delete(&id).unwrap();
+        events.lock().unwrap().clear();
+        exit(&third);
+        assert!(events.lock().unwrap().is_empty());
+        assert!(
+            registry.get_buf(&third).is_empty(),
+            "the exiting ring is released"
+        );
     }
 
     // VERIFY: wave3-fix-crons-11

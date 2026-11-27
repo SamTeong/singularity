@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CronExpressionParser } from 'cron-parser';
 import * as reg from './agents.mjs';
+import { stripAnsi } from './tasks.mjs';
 
 const CRONS_FILE = join(reg.STATE_DIR, 'crons.json');
 const TICK_MS = 1000;
@@ -20,7 +21,11 @@ const crons = new Map(); // id -> job (plain object)
 const nextFires = new Map(); // id -> CronDate (in-memory only, never persisted)
 const cronSessions = new Set(); // session ids spawned by a cron fire (for auto-kill on idle)
 const killTimers = new Map(); // session id -> confirm timer (ride out startup pauses before killing)
+const idleKilled = new Set(); // session ids the confirm timer killed (their 'exited' is an idle end)
 const KILL_CONFIRM_MS = 6000; // kill only after this much sustained idle
+const RUN_TAIL_CHARS = 2048; // lastRunTail: visible tail of the run's terminal output
+// Outcome of the run lastSessionId names; a new run clears them (see clearRunOutcome).
+const RUN_OUTCOME_FIELDS = ['lastRunEndedAt', 'lastRunEnd', 'lastRunDurationMs', 'lastRunTail'];
 let logger = null;
 
 function persist(jobs = crons) {
@@ -35,6 +40,35 @@ function persist(jobs = crons) {
 }
 
 function emitCrons() { reg.bus.emit('crons', snapshotCrons()); }
+
+function clearRunOutcome(job) { for (const field of RUN_OUTCOME_FIELDS) delete job[field]; }
+
+// VERIFY: crons-run-outcome
+// A cron session ended ('idle' = auto-killed after sustained idle, 'exited' =
+// the process ended by itself). Runs on the 'exited' status, before reg.kill
+// drops the record, so the ring buffer is still readable. A session no job
+// names as lastSessionId (job deleted) is ignored.
+function recordRunEnd(id, end) {
+  const job = [...crons.values()].find((j) => j.lastSessionId === id);
+  if (!job) return;
+  const endedAt = Date.now();
+  const ended = {
+    ...job,
+    lastRunEndedAt: endedAt,
+    lastRunEnd: end,
+    lastRunDurationMs: job.lastFiredAt != null ? endedAt - job.lastFiredAt : null,
+    lastRunTail: stripAnsi(reg.getBuf(id)).slice(-RUN_TAIL_CHARS).trim(),
+  };
+  const staged = new Map(crons);
+  staged.set(job.id, ended);
+  try {
+    persist(staged);
+    Object.assign(job, ended);
+    emitCrons();
+  } catch (e) {
+    logger?.warn({ id: job.id, err: e.message }, 'cron run outcome persistence failed');
+  }
+}
 
 function validateExpr(expr) {
   // Throws on invalid expr (caller turns it into a 400).
@@ -68,6 +102,7 @@ export function initCrons(log) {
     job.lastSessionId = agent.id;
     job.lastFiredAt = job.pendingRunAt;
     job.updatedAt = Date.now();
+    clearRunOutcome(job);
     delete job.pendingRunId;
     delete job.pendingRunAt;
     cronSessions.add(agent.id);
@@ -102,11 +137,12 @@ export function initCrons(log) {
       if (killTimers.has(id)) { clearTimeout(killTimers.get(id)); killTimers.delete(id); }
     } else if (status === 'idle') {
       if (!killTimers.has(id)) {
-        killTimers.set(id, setTimeout(() => { killTimers.delete(id); reg.kill(id); }, KILL_CONFIRM_MS));
+        killTimers.set(id, setTimeout(() => { killTimers.delete(id); idleKilled.add(id); reg.kill(id); }, KILL_CONFIRM_MS));
       }
     } else if (status === 'exited') {
       if (killTimers.has(id)) { clearTimeout(killTimers.get(id)); killTimers.delete(id); }
       cronSessions.delete(id);
+      recordRunEnd(id, idleKilled.delete(id) ? 'idle' : 'exited');
       reg.kill(id); // proc is now null -> deletes the record from the registry
     }
   });
@@ -133,6 +169,7 @@ async function spawnForJob(job) {
   job.lastFiredAt = Date.now();
   job.updatedAt = Date.now();
   job.lastError = null;
+  clearRunOutcome(job);
   cronSessions.add(agent.id);
   const pendingRunId = job.pendingRunId;
   const pendingRunAt = job.pendingRunAt;
@@ -266,6 +303,7 @@ export async function runCron(id) {
       job.lastSessionId = agent.id;
       job.lastFiredAt = Date.now();
       job.updatedAt = Date.now();
+      clearRunOutcome(job);
       persist();
       delete job.pendingRunId;
       delete job.pendingRunAt;

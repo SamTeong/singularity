@@ -26,26 +26,28 @@ function findJob(id) {
 }
 
 async function isolatedScheduledCron() {
-  const fixture = { events: [], failWrite: false, spawns: 0, tick: null };
+  const fixture = { events: [], failWrite: false, spawns: 0, tick: null, status: null, timers: [], kills: [], buf: '', written: null };
   const key = `cronFixture${Date.now()}${Math.random()}`;
   globalThis[key] = fixture;
   const data = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   const access = `const f = globalThis[${JSON.stringify(key)}];`;
   const agents = data(`${access}
     export const STATE_DIR = ${JSON.stringify(STATE_DIR)};
-    export const bus = { emit: (...args) => f.events.push(args), on: () => {} };
-    export function writeAtomic() { if (f.failWrite) throw new Error('disk full'); }
+    export const bus = { emit: (...args) => f.events.push(args), on: (event, fn) => { if (event === 'status') f.status = fn; } };
+    export function writeAtomic(file, text) { if (f.failWrite) throw new Error('disk full'); f.written = text; }
     export const isLive = () => false;
-    export const create = () => { f.spawns++; return { id: 'spawned' }; };
+    export const create = () => { f.spawns++; return { id: \`spawned-\${f.spawns}\` }; };
     export const findByRunId = () => null;
     export const getStatus = () => null;
-    export const kill = () => {};
+    export const getBuf = () => f.buf;
+    export const kill = (id) => { f.kills.push(id); };
   `);
   const source = readFileSync(new URL('./crons.mjs', import.meta.url), 'utf8')
     .replace("import { existsSync, readFileSync } from 'node:fs';", 'const existsSync = () => false;')
     .replace("import { CronExpressionParser } from 'cron-parser';", "const CronExpressionParser = { parse: () => ({ next: () => ({ getTime: () => 0, toISOString: () => '1970-01-01T00:00:00.000Z' }) }) };")
     .replace("import * as reg from './agents.mjs';", `import * as reg from '${agents}';`)
-    .replace('let logger = null;', `${access} const setInterval = (fn) => { f.tick = fn; return { unref() {} }; }; let logger = null;`);
+    .replace("from './tasks.mjs';", `from '${new URL('./tasks.mjs', import.meta.url)}';`)
+    .replace('let logger = null;', `${access} const setInterval = (fn) => { f.tick = fn; return { unref() {} }; }; const setTimeout = (fn) => { f.timers.push(fn); return fn; }; const clearTimeout = (fn) => { f.timers = f.timers.filter((t) => t !== fn); }; let logger = null;`);
   const crons = await import(data(source));
   delete globalThis[key];
   return { fixture, crons };
@@ -161,4 +163,59 @@ test('scheduled tick: begin-run disk failure is contained without spawning or pu
   assert.equal(after.lastError, undefined);
   assert.equal(after.pendingRunId, undefined);
   assert.deepEqual(fixture.events, []);
+});
+
+const RUN_OUTCOME_FIELDS = ['lastRunEndedAt', 'lastRunEnd', 'lastRunDurationMs', 'lastRunTail'];
+
+test('run outcome: an idle auto-kill records idle end, duration and stripped tail, persists and emits', async () => {
+  const { fixture, crons } = await isolatedScheduledCron();
+  crons.initCrons(null);
+  const job = crons.createCron({ title: 'idle outcome', cronExpr: '0 0 * * *', description: 'p', cwd: 'C:\\x', enabled: false });
+  const agent = await crons.runCron(job.id);
+  fixture.buf = `${'x'.repeat(3000)}\x1b[31mlogin expired\x1b[0m\r\n  `;
+  fixture.status({ id: agent.id, status: 'idle' });
+  assert.equal(fixture.timers.length, 1);
+  fixture.timers.shift()();
+  assert.deepEqual(fixture.kills, [agent.id]);
+  fixture.events.length = 0;
+  fixture.status({ id: agent.id, status: 'exited' });
+  const after = crons.snapshotCrons().find((entry) => entry.id === job.id);
+  assert.equal(after.lastRunEnd, 'idle');
+  assert.equal(typeof after.lastRunEndedAt, 'number');
+  assert.equal(after.lastRunDurationMs, after.lastRunEndedAt - after.lastFiredAt);
+  assert.ok(after.lastRunTail.endsWith('login expired'), 'ANSI stripped and trimmed');
+  assert.ok(!after.lastRunTail.includes('\x1b'));
+  assert.ok(after.lastRunTail.length <= 2048);
+  assert.equal(JSON.parse(fixture.written).crons.find((entry) => entry.id === job.id).lastRunEnd, 'idle');
+  assert.equal(fixture.events.filter(([name]) => name === 'crons').length, 1);
+});
+
+test('run outcome: a self-exit records exited, and the next run clears all four fields', async () => {
+  const { fixture, crons } = await isolatedScheduledCron();
+  crons.initCrons(null);
+  const job = crons.createCron({ title: 'exit outcome', cronExpr: '0 0 * * *', description: 'p', cwd: 'C:\\x', enabled: false });
+  const agent = await crons.runCron(job.id);
+  fixture.buf = 'crashed';
+  fixture.status({ id: agent.id, status: 'exited' });
+  const ended = crons.snapshotCrons().find((entry) => entry.id === job.id);
+  assert.equal(ended.lastRunEnd, 'exited');
+  assert.equal(ended.lastRunTail, 'crashed');
+  const next = await crons.runCron(job.id);
+  assert.notEqual(next.id, agent.id);
+  const rerun = crons.snapshotCrons().find((entry) => entry.id === job.id);
+  assert.equal(rerun.lastSessionId, next.id);
+  for (const field of RUN_OUTCOME_FIELDS) assert.equal(field in rerun, false, `${field} cleared`);
+  for (const field of RUN_OUTCOME_FIELDS) assert.equal(field in JSON.parse(fixture.written).crons[0], false, `${field} cleared on disk`);
+});
+
+test('run outcome: a session whose job was deleted is ignored', async () => {
+  const { fixture, crons } = await isolatedScheduledCron();
+  crons.initCrons(null);
+  const job = crons.createCron({ title: 'deleted outcome', cronExpr: '0 0 * * *', description: 'p', cwd: 'C:\\x', enabled: false });
+  const agent = await crons.runCron(job.id);
+  crons.deleteCron(job.id);
+  fixture.events.length = 0;
+  fixture.status({ id: agent.id, status: 'exited' });
+  assert.deepEqual(fixture.events, []);
+  assert.deepEqual(fixture.kills, [agent.id]);
 });

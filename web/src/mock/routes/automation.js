@@ -111,6 +111,8 @@ export function registerAutomation(server) {
     job.lastFiredAt = Date.now();
     job.updatedAt = Date.now();
     job.lastError = null;
+    // A new run clears the previous run's outcome, like the daemon.
+    for (const field of ['lastRunEndedAt', 'lastRunEnd', 'lastRunDurationMs', 'lastRunTail']) delete job[field];
     broadcast({ t: 'crons', crons: db.crons });
     return { ok: true, cron: job };
   }, 200);
